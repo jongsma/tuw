@@ -40,6 +40,8 @@ are fully transparent. Everyone is welcome to study, learn from, modify and impr
 | `crates/tuwe` | TUWE, the editor application |
 | `crates/tuws` | TUWS, the synthesizer plugin (planned) |
 | `docs/SPEC.md` | TUW3 file format specification |
+| `docs/DECISIONS.md` | Decision log: what was decided and why |
+| `docs/DESIGN-NOTES.md` | Design concepts, DSP notes and research |
 
 ## Building
 

@@ -25,6 +25,10 @@ The Codeberg repository is a read-only mirror and does not accept issues or pull
 - `cargo test`: headless DSP tests (preferred for anything that can be checked numerically)
 - TUWS standalone mode (`--features standalone`): real-time listening tests
 - `pluginval`: DAW compatibility checks for TUWS
+- Carla or Reaper: external host checks when needed
+
+Background on the design and earlier decisions is in `docs/DECISIONS.md` and
+`docs/DESIGN-NOTES.md`.
 
 ## Dependencies
 

@@ -11,6 +11,11 @@ follow this file and point out the conflict.
 - **wavetable-core**: shared engine and TUW3 reader/writer (`crates/wavetable-core`)
 - **TUW3**: open 3D wavetable file format, specified in `docs/SPEC.md`
 
+Background reading, before larger changes:
+
+- `docs/DECISIONS.md`: settled decisions and why (licence, hosting, stack, format)
+- `docs/DESIGN-NOTES.md`: design concepts, DSP pitfalls and research notes (not binding)
+
 Current phase: **Phase 1**, the TUWE editor core and the TUW3 spec. Don't build ahead into later
 phases (plugin, CI matrix, algorithmic generation) unless the task asks for it.
 
