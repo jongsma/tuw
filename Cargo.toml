@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = ["crates/tuw3", "crates/tuw-core", "crates/tuwe"]
+# crates/tuws (the plugin) joins in Phase 4.
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+authors = ["Klaas-Jan Jongsma"]
+repository = "https://github.com/jongsma/tuw"
+homepage = "https://github.com/jongsma/tuw"
+# Nothing is published to crates.io yet. Flip per crate when a release is planned.
+publish = false
+
+[workspace.dependencies]
+tuw3 = { path = "crates/tuw3", version = "0.0.0" }
+tuw-core = { path = "crates/tuw-core", version = "0.0.0" }
+
+[workspace.lints.clippy]
+# AGENTS.md: never compare floats with `==`; use an explicit, justified tolerance.
+float_cmp = "warn"
+float_cmp_const = "warn"

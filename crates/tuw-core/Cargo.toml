@@ -1,0 +1,20 @@
+[package]
+name = "tuw-core"
+description = "Wavetable engine shared by the TUWE editor and the TUWS synth"
+keywords = ["wavetable", "audio", "dsp", "synthesizer"]
+categories = ["multimedia::audio"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+# No GUI or plugin dependencies (no egui, no nih-plug): any tool must be able to use this crate.
+[dependencies]
+tuw3.workspace = true
+
+[lints]
+workspace = true

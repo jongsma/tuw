@@ -1,0 +1,19 @@
+[package]
+name = "tuw3"
+description = "Reader and writer for TUW3, the open 3D wavetable file format"
+keywords = ["wavetable", "audio", "synthesizer", "file-format"]
+categories = ["multimedia::audio", "parser-implementations"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+# Keep this crate light: no DSP, GUI or plugin dependencies, so any tool can use it.
+[dependencies]
+
+[lints]
+workspace = true
