@@ -11,9 +11,10 @@ The Codeberg repository is a read-only mirror and does not accept issues or pull
 
 ## Getting started
 
-1. Open an issue first for larger changes, so we can discuss the approach.
-2. Fork the repo and create a branch.
-3. Make sure these pass before you open a pull request:
+1. Read [`docs/WORKFLOW.md`](docs/WORKFLOW.md) to see which track your change takes.
+2. Open an issue first for anything beyond a trivial fix, so we can discuss the approach.
+3. Fork the repo and create a branch named `<type>/<issue>-<slug>`.
+4. Make sure these pass before you open a pull request:
    ```sh
    cargo fmt --all
    cargo clippy --workspace --all-targets -- -D warnings
