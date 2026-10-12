@@ -7,14 +7,16 @@ follow this file and point out the conflict.
 ## Project at a glance
 
 - **TUWE**: wavetable editor (`crates/tuwe`)
-- **TUWS**: VST3/CLAP synthesizer plugin, built with NIH-plug (`crates/tuws`, planned)
-- **wavetable-core**: shared engine and TUW3 reader/writer (`crates/wavetable-core`)
+- **TUWS**: VST3/CLAP synthesizer plugin, built with NIH-plug (`crates/tuws`, Phase 4)
+- **tuw-core**: shared wavetable engine, used by TUWE and TUWS (`crates/tuw-core`)
+- **tuw3**: TUW3 reader/writer (`crates/tuw3`)
 - **TUW3**: open 3D wavetable file format, specified in `docs/SPEC.md`
 
 Background reading, before larger changes:
 
 - `docs/DECISIONS.md`: settled decisions and why (licence, hosting, stack, format)
 - `docs/DESIGN-NOTES.md`: design concepts, DSP pitfalls and research notes (not binding)
+- `docs/WORKFLOW.md`: how work flows from issue to merged PR (tracks, feature docs, superpowers)
 
 Current phase: **Phase 1**, the TUWE editor core and the TUW3 spec. Don't build ahead into later
 phases (plugin, CI matrix, algorithmic generation) unless the task asks for it.
@@ -31,7 +33,7 @@ cargo test --workspace
 
 Other commands:
 
-- TUWS standalone (real-time listening): `cargo run -p tuws --features standalone`
+- TUWS standalone (real-time listening, once `crates/tuws` exists): `cargo run -p tuws --features standalone`
 - License/dependency check: `cargo deny check`
 
 ## Hard rules
@@ -72,7 +74,7 @@ If you are unsure whether code runs on the audio thread, assume it does.
 
 ### TUW3 file format
 
-- `docs/SPEC.md` is the source of truth. The reader/writer in `wavetable-core` follows the spec,
+- `docs/SPEC.md` is the source of truth. The reader/writer in `tuw3` follows the spec,
   never the other way round.
 - To change the format, update `SPEC.md` first, in the same PR, and state whether the change
   needs a `version` bump.
@@ -95,19 +97,30 @@ If you are unsure whether code runs on the audio thread, assume it does.
 
 ## Code style and structure
 
-- Keep `wavetable-core` free of GUI and plugin dependencies (no `egui`, no `nih-plug`).
-  It must be usable by any tool.
-- Errors: use typed errors in `wavetable-core`; reserve `anyhow`-style errors for binaries.
-- Public items in `wavetable-core` get doc comments; the crate is meant to be read and learned from.
+- Crate dependencies point one way: `tuwe`/`tuws` → `tuw-core` → `tuw3`. Never the reverse.
+- Keep `tuw3` free of DSP, GUI and plugin dependencies; it only reads and writes the format.
+- Keep `tuw-core` free of GUI and plugin dependencies (no `egui`, no `nih-plug`).
+  Both must be usable by any tool.
+- Errors: use typed errors in `tuw3` and `tuw-core`; reserve `anyhow`-style errors for binaries.
+- Public items in `tuw3` and `tuw-core` get doc comments; they are meant to be read and learned from.
 - Prefer clear code over clever code. This project exists to share knowledge.
 
 ## Working method
 
-1. For non-trivial changes, check whether an issue exists or describe the approach first.
-2. Write or update tests, then implement.
-3. Keep changes focused: one concern per PR, no drive-by refactors.
-4. Run the commands above before declaring something done.
+Full process: [`docs/WORKFLOW.md`](docs/WORKFLOW.md). The essentials:
+
+1. Pick the track: **S** trivial (branch → PR), **M** change (issue → test first → PR),
+   **L** feature (issue → feature doc in `docs/features/<issue>-<slug>.md` → plan → test-first
+   tasks → PR), **Format** (as L, plus `SPEC.md` in the same PR).
+2. Spec-kit lite: this file is the constitution; one feature doc holds spec, plan and tasks;
+   clarify open questions before planning; acceptance criteria become tests.
+3. Superpowers skills: write `brainstorming` and `writing-plans` output into the feature doc,
+   not the skills' default folders. Always finish with a PR, never a local merge to `main`.
+4. Branches `<type>/<issue>-<slug>`, Conventional Commits with the crate as scope, squash merge.
+5. Keep changes focused: one concern per PR, no drive-by refactors.
+6. Run the commands above before declaring something done.
    Report honestly what you did and did not verify (e.g. "not tested in a DAW").
+7. Open questions become `type:question` issues; settled decisions go into `docs/DECISIONS.md`.
 
 ## Don't
 
