@@ -26,7 +26,8 @@ implementations. The format is meant to be implementable by any tool.
 
 ## Frame order
 
-To be specified (proposal: Z-major, then Y, then samples within a frame).
+To be specified (proposal: Z-major, then Y, then samples within a frame; see
+[#2](https://github.com/jongsma/tuw/issues/2)).
 
 ## Metadata
 
@@ -34,7 +35,13 @@ Planned fields: `name`, `author`, `license`, `y_label`, `z_label`, `description`
 
 ## Open questions
 
-- TOML or JSON for the metadata block
-- Optional compression
-- Endianness and alignment guarantees
-- A separate, permissive license for this specification so any tool can implement it
+Each is discussed in a GitHub issue; outcomes are recorded here and in `DECISIONS.md`.
+
+- TOML or JSON for the metadata block ([#1](https://github.com/jongsma/tuw/issues/1))
+- Frame order ([#2](https://github.com/jongsma/tuw/issues/2))
+- Alignment of the sample block; endianness is little-endian throughout ([#3](https://github.com/jongsma/tuw/issues/3))
+- Size limits and allowed frame sizes ([#4](https://github.com/jongsma/tuw/issues/4))
+- Optional compression ([#5](https://github.com/jongsma/tuw/issues/5))
+- A separate, permissive license for this specification so any tool can implement it ([#6](https://github.com/jongsma/tuw/issues/6))
+- Frame normalisation conventions: phase-canonical, DC-free ([#7](https://github.com/jongsma/tuw/issues/7))
+- Whether files may carry precomputed mip levels ([#8](https://github.com/jongsma/tuw/issues/8))

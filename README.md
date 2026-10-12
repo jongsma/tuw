@@ -28,7 +28,7 @@ are fully transparent. Everyone is welcome to study, learn from, modify and impr
 
 1. TUWE editor core and the TUW3 format spec
 2. Algorithmic wavetable generation (FFT analysis of existing wavetable libraries)
-3. Extract the `wavetable-core` crate
+3. Stabilise the `tuw-core` and `tuw3` APIs for use by TUWS
 4. TUWS, the VST3/CLAP plugin
 5. Cross-platform CI and releases
 
@@ -36,12 +36,15 @@ are fully transparent. Everyone is welcome to study, learn from, modify and impr
 
 | Path | Contents |
 |---|---|
-| `crates/wavetable-core` | Wavetable engine and TUW3 reader/writer, shared by TUWE and TUWS |
+| `crates/tuw3` | TUW3 file format reader/writer (no DSP or GUI dependencies) |
+| `crates/tuw-core` | Wavetable engine shared by TUWE and TUWS |
 | `crates/tuwe` | TUWE, the editor application |
-| `crates/tuws` | TUWS, the synthesizer plugin (planned) |
+| `crates/tuws` | TUWS, the synthesizer plugin (Phase 4, not created yet) |
 | `docs/SPEC.md` | TUW3 file format specification |
 | `docs/DECISIONS.md` | Decision log: what was decided and why |
 | `docs/DESIGN-NOTES.md` | Design concepts, DSP notes and research |
+| `docs/WORKFLOW.md` | Way of working: issues, feature docs, branches, PRs |
+| `docs/features/` | One spec-and-plan doc per larger feature |
 
 ## Building
 
