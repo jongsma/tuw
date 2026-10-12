@@ -20,9 +20,9 @@ formants.
 
 ## Why open source?
 
-TUWE and TUWS will never be sold. The aim is to share the knowledge, build it together and
-end up with a synth whose inner workings are fully transparent. Everyone is welcome to read,
-learn from, change and improve the code.
+TUWE and TUWS are, and will remain, free of charge. The project's goal is to share knowledge
+openly, develop the software collaboratively, and deliver a synthesizer whose inner workings
+are fully transparent. Everyone is welcome to study, learn from, modify and improve the code.
 
 ## Roadmap
 
