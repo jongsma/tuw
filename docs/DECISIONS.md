@@ -130,3 +130,40 @@ Instead, a *lite* version: one file per feature (spec, plan and tasks together) 
 `docs/features/`, written with the superpowers `brainstorming` and `writing-plans` skills, and
 clearly separate from the format spec in `SPEC.md`. Full spec-kit can still be tried on a single,
 well-bounded editor feature (3D view, import flow, undo) if the lite version falls short.
+
+## D11. TUW3 version 0 layout (Oct 2026)
+
+**Decision:** the open format questions #1–#5 are settled as follows; the full rules are in
+[`SPEC.md`](SPEC.md). The format stays at `version` 0, since no files exist yet.
+
+| Question | Outcome |
+|---|---|
+| Frame order ([#2](https://github.com/jongsma/tuw/issues/2)) | Z-major: X (samples) fastest, then Y, then Z |
+| Alignment ([#3](https://github.com/jongsma/tuw/issues/3)) | 24-byte fixed header; zero padding after the metadata so samples start on a 16-byte boundary |
+| Compression ([#5](https://github.com/jongsma/tuw/issues/5)) | None in v0; a u16 `flags` field (must be 0) reserves room for it |
+| Size limits ([#4](https://github.com/jongsma/tuw/issues/4)) | `frame_size` 8–65 536, not necessarily a power of two; `y_size`/`z_size` 1–4 096; at most 2²⁸ samples; `meta_len` ≤ 1 MiB |
+| Metadata ([#1](https://github.com/jongsma/tuw/issues/1)) | One UTF-8 JSON object; known fields are optional strings; unknown keys ignored and preserved |
+| Trailing bytes | Rejected: the header fixes the exact file length |
+| Non-finite samples | NaN and ±Infinity are not allowed; readers reject them |
+
+**Why:**
+
+- *Z-major:* every Z-slice is a contiguous 1D wavetable, so Serum-style WAV import/export is a
+  plain copy and a reader can lazily load one slice with one seek. Bilinear playback needs two
+  adjacent rows whichever axis is outer, so playback doesn't favour either order.
+- *Alignment and flags:* a 16-byte aligned sample block allows memory-mapping, zero-copy
+  `&[f32]` access, SIMD-friendly loads and lazy loading of large libraries (DESIGN-NOTES §2.5),
+  at a cost of at most 15 bytes. A field inserted later would shift the whole header, so
+  `flags` is added now; it also makes the fixed header 24 bytes.
+- *No compression:* lossless compression of full-band `f32` frames saves comparatively little,
+  and it would rule out zero-copy and per-slice lazy loading and force every implementer to
+  carry a compression library. On current hardware raw size is acceptable.
+- *Limits:* readers must bound allocations from untrusted input; the total-sample cap is the
+  real memory guard. Powers of two aren't required so sources such as AKWF (600 samples per
+  frame) are stored as they are; `tuw-core` handles any frame size.
+- *JSON:* the block lives inside a binary file, so TOML's hand-editing advantage doesn't apply,
+  while JSON has a parser in practically every language, which matters for an open format.
+- *Trailing bytes and non-finite samples:* data in an unexpected place means corruption, a
+  writer bug, an unknown newer format or hidden data; none of these should be accepted
+  silently. Rejecting NaN/Inf at load time means a player never has to check samples on the
+  audio thread.
