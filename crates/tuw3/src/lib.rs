@@ -7,8 +7,8 @@
 //! this crate follows the spec, never the other way round.
 //!
 //! The spec is still a draft (version 0). Only settled parts are implemented here.
-//! Open points (metadata format, frame order, compression) are tracked as GitHub issues
-//! and must not be decided silently in code.
+//! Points still open in the spec are tracked as GitHub issues and must not be decided
+//! silently in code.
 //!
 //! This crate deliberately has no DSP, GUI or plugin dependencies.
 
@@ -19,8 +19,9 @@
 pub const MAGIC: [u8; 4] = *b"TUW3";
 
 /// Length in bytes of the fixed header fields that precede the metadata block:
-/// `magic` (4) + `version` (2) + `frame_size` (4) + `y_size` (4) + `z_size` (4) + `meta_len` (4).
-pub const FIXED_HEADER_LEN: usize = 22;
+/// `magic` (4) + `version` (2) + `flags` (2) + `frame_size` (4) + `y_size` (4) +
+/// `z_size` (4) + `meta_len` (4).
+pub const FIXED_HEADER_LEN: usize = 24;
 
 #[cfg(test)]
 mod tests {
@@ -34,7 +35,7 @@ mod tests {
     #[test]
     fn fixed_header_len_matches_spec_field_sizes() {
         // Field sizes from the layout table in SPEC.md, in order.
-        let fields = [4, 2, 4, 4, 4, 4];
+        let fields = [4, 2, 2, 4, 4, 4, 4];
         assert_eq!(fields.iter().sum::<usize>(), FIXED_HEADER_LEN);
     }
 }

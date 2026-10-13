@@ -86,7 +86,7 @@ If you are unsure whether code runs on the audio thread, assume it does.
   - reject truncated files
   - never trust declared lengths for allocation without a sane upper limit
 - Every format feature needs a round-trip test (write → read → identical).
-- Points still marked as open in `SPEC.md` (metadata format, frame order, compression) are
+- Points still marked as open in `SPEC.md` (its *Open questions* section) are
   **not decided**. Don't settle them silently in code. Raise them instead.
 
 ### Serum-style WAV interop
