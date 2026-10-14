@@ -113,7 +113,21 @@ Known fields, all optional:
 | `description` | string | Free text |
 
 - A known field with a value of the wrong type makes the file invalid.
+- Keys must be unique within every JSON object, at every nesting level. A file with a duplicate
+  key is invalid.
 - Readers must ignore unknown keys. Editors should preserve them when re-saving the file.
+- RFC 8259 lets JSON parsers set their own limits. So that every reader can parse every valid
+  file, the metadata must also stay within these bounds, or the file is invalid:
+  - Objects and arrays are nested at most 64 levels deep. The top-level object is level 1,
+    so `{"a":[{}]}` is nested 3 levels deep.
+  - Every number fits in a 64-bit IEEE 754 float: after rounding to the nearest value, it is
+    finite. `1e400` does not fit; `1e-400` rounds to zero and does.
+  - Every string is valid Unicode text: a `\uD800`–`\uDFFF` escape must be part of a
+    surrogate pair (a high surrogate directly followed by a low one).
+- Editors may re-encode the metadata when they re-save a file: whitespace, key order and the
+  spelling of numbers can change (`1e5` may become `100000.0`), as RFC 8259 allows. If the
+  re-encoded metadata would exceed the 1 MiB limit, a reader may report the file as
+  unsupported (see [Size limits](#size-limits)).
 
 Example:
 
