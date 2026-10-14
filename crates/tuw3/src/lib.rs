@@ -15,8 +15,16 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod error;
+pub mod limits;
+
+pub use error::{MetadataError, ReadError, SizeField, TableError};
+
 /// Magic bytes at the start of every TUW3 file (`SPEC.md`, offset 0).
 pub const MAGIC: [u8; 4] = *b"TUW3";
+
+/// The format version this crate reads and writes (`SPEC.md`, offset 4).
+pub const VERSION: u16 = 0;
 
 /// Length in bytes of the fixed header fields that precede the metadata block:
 /// `magic` (4) + `version` (2) + `flags` (2) + `frame_size` (4) + `y_size` (4) +
