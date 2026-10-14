@@ -16,13 +16,16 @@
 #![warn(missing_docs)]
 
 mod error;
+mod layout;
 pub mod limits;
 mod metadata;
 mod table;
+mod write;
 
 pub use error::{MetadataError, ReadError, SizeField, TableError};
 pub use metadata::Metadata;
 pub use table::Table;
+pub use write::write;
 
 /// Magic bytes at the start of every TUW3 file (`SPEC.md`, offset 0).
 pub const MAGIC: [u8; 4] = *b"TUW3";

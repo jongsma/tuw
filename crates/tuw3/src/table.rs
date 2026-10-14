@@ -21,6 +21,8 @@ pub struct Table {
     /// All samples in spec order: X fastest, then Y, then Z.
     samples: Vec<f32>,
     metadata: Metadata,
+    /// `metadata` serialised once here, so its length can be checked and `write` cannot fail.
+    metadata_json: Vec<u8>,
 }
 
 impl Table {
@@ -57,9 +59,11 @@ impl Table {
                 z: index / frame_size / y_size,
             });
         }
-        let metadata_len = metadata.to_json().len() as u64;
-        if metadata_len > u64::from(MAX_META_LEN) {
-            return Err(TableError::MetadataTooLong { len: metadata_len });
+        let metadata_json = metadata.to_json();
+        if metadata_json.len() as u64 > u64::from(MAX_META_LEN) {
+            return Err(TableError::MetadataTooLong {
+                len: metadata_json.len() as u64,
+            });
         }
         Ok(Table {
             frame_size,
@@ -67,6 +71,7 @@ impl Table {
             z_size,
             samples,
             metadata,
+            metadata_json,
         })
     }
 
@@ -110,6 +115,11 @@ impl Table {
     /// build a new table.
     pub fn into_parts(self) -> (Vec<f32>, Metadata) {
         (self.samples, self.metadata)
+    }
+
+    /// The metadata block as it is written to a file.
+    pub(crate) fn metadata_json(&self) -> &[u8] {
+        &self.metadata_json
     }
 }
 
