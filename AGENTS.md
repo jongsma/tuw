@@ -9,7 +9,7 @@ follow this file and point out the conflict.
 - **TUWE**: wavetable editor (`crates/tuwe`)
 - **TUWS**: VST3/CLAP synthesizer plugin, built with NIH-plug (`crates/tuws`, Phase 4)
 - **tuw-core**: shared wavetable engine, used by TUWE and TUWS (`crates/tuw-core`)
-- **tuw3**: TUW3 reader/writer (`crates/tuw3`)
+- **tuw3**: converts between TUW3 file bytes and validated wavetables; no file I/O (`crates/tuw3`)
 - **TUW3**: open 3D wavetable file format, specified in `docs/SPEC.md`
 
 Background reading, before larger changes:
@@ -74,7 +74,7 @@ If you are unsure whether code runs on the audio thread, assume it does.
 
 ### TUW3 file format
 
-- `docs/SPEC.md` is the source of truth. The reader/writer in `tuw3` follows the spec,
+- `docs/SPEC.md` is the source of truth. The `read`/`write` code in `tuw3` follows the spec,
   never the other way round.
 - To change the format, update `SPEC.md` first, in the same PR, and state whether the change
   needs a `version` bump.
@@ -98,7 +98,9 @@ If you are unsure whether code runs on the audio thread, assume it does.
 ## Code style and structure
 
 - Crate dependencies point one way: `tuwe`/`tuws` → `tuw-core` → `tuw3`. Never the reverse.
-- Keep `tuw3` free of DSP, GUI and plugin dependencies; it only reads and writes the format.
+- Keep `tuw3` free of DSP, GUI and plugin dependencies, and free of file I/O: it only converts
+  between TUW3 bytes and tables. `read` and `write` there mean bytes → table and table → bytes;
+  the caller moves the bytes to and from disk.
 - Keep `tuw-core` free of GUI and plugin dependencies (no `egui`, no `nih-plug`).
   Both must be usable by any tool.
 - Errors: use typed errors in `tuw3` and `tuw-core`; reserve `anyhow`-style errors for binaries.

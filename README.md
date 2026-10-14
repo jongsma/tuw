@@ -36,7 +36,7 @@ are fully transparent. Everyone is welcome to study, learn from, modify and impr
 
 | Path | Contents |
 |---|---|
-| `crates/tuw3` | TUW3 file format reader/writer (no DSP or GUI dependencies) |
+| `crates/tuw3` | Converts between TUW3 file bytes and validated wavetables; no file I/O, no DSP or GUI dependencies |
 | `crates/tuw-core` | Wavetable engine shared by TUWE and TUWS |
 | `crates/tuwe` | TUWE, the editor application |
 | `crates/tuws` | TUWS, the synthesizer plugin (Phase 4, not created yet) |
