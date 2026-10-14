@@ -19,11 +19,13 @@ mod error;
 mod layout;
 pub mod limits;
 mod metadata;
+mod read;
 mod table;
 mod write;
 
 pub use error::{MetadataError, ReadError, SizeField, TableError};
 pub use metadata::Metadata;
+pub use read::read;
 pub use table::Table;
 pub use write::write;
 

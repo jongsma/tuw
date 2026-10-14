@@ -55,7 +55,6 @@ impl Metadata {
     }
 
     /// Parses a metadata block. An empty block means "no metadata".
-    #[allow(dead_code)] // used by `read`, added in the next task
     pub(crate) fn from_json(bytes: &[u8]) -> Result<Metadata, MetadataError> {
         if bytes.is_empty() {
             return Ok(Metadata::default());

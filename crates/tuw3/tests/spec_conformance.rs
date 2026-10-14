@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{RawFile, position_table};
+use common::{RawFile, assert_same_table, position_table};
 use tuw3::{Metadata, Table};
 
 /// AC1: `write` produces exactly the bytes the spec describes, and `read` reverses it.
@@ -32,6 +32,7 @@ fn golden_file_matches_spec_layout() {
     assert_eq!(expected.len(), 80);
 
     assert_eq!(tuw3::write(&table), expected);
+    assert_same_table(&tuw3::read(&expected).unwrap(), &table);
 }
 
 /// AC1: the test helper agrees with the hand-assembled layout, so other tests can rely on it.
