@@ -1,6 +1,6 @@
 [package]
 name = "tuw3"
-description = "Reader and writer for TUW3, the open 3D wavetable file format"
+description = "Converts between TUW3 file bytes and validated wavetables (TUW3: the open 3D wavetable format); no file I/O"
 keywords = ["wavetable", "audio", "synthesizer", "file-format"]
 categories = ["multimedia::audio", "parser-implementations"]
 version.workspace = true

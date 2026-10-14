@@ -56,7 +56,7 @@ AudioPluginHost would have been used for.
 
 | Crate | Role | May depend on |
 |---|---|---|
-| `tuw3` | TUW3 reader/writer only | std (plus a metadata parser once that is decided) |
+| `tuw3` | TUW3 bytes ↔ table conversion only, no file I/O | std (plus a metadata parser once that is decided) |
 | `tuw-core` | Wavetable engine: frames, bilinear morph, analysis, bandlimiting | `tuw3` |
 | `tuwe` | The editor (binary, egui) | `tuw-core` |
 | `tuws` | The plugin (NIH-plug), Phase 4 | `tuw-core` |

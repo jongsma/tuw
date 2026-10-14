@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Reader and writer for **TUW3**, the open 3D wavetable file format.
+//! Converts between the bytes of a **TUW3** file and a validated wavetable. TUW3 is the open 3D
+//! wavetable file format.
+//!
+//! In this crate, *read* and *write* mean converting, not file access:
+//!
+//! - [`read`] checks bytes against the spec and turns them into a [`Table`].
+//! - [`write()`] turns a [`Table`] into the bytes of a TUW3 file.
+//!
+//! Getting the bytes from a disk, a DAW's saved plugin state or anywhere else is up to the
+//! caller (see the examples on [`read`] and [`write()`]).
 //!
 //! A TUW3 file holds a grid of single-cycle frames along two morph axes (Y and Z).
 //! The format is defined in [`docs/SPEC.md`](https://github.com/jongsma/tuw/blob/main/docs/SPEC.md);
@@ -10,8 +19,7 @@
 //! Points still open in the spec are tracked as GitHub issues and must not be decided
 //! silently in code.
 //!
-//! This crate deliberately has no DSP, GUI or plugin dependencies, and does no I/O: it turns
-//! bytes into a [`Table`] and back, and the caller reads or writes the file.
+//! This crate deliberately has no DSP, GUI or plugin dependencies, and does no file I/O.
 //!
 //! ```
 //! let mut metadata = tuw3::Metadata::default();
