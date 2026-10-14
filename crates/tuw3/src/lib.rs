@@ -17,8 +17,12 @@
 
 mod error;
 pub mod limits;
+mod metadata;
+mod table;
 
 pub use error::{MetadataError, ReadError, SizeField, TableError};
+pub use metadata::Metadata;
+pub use table::Table;
 
 /// Magic bytes at the start of every TUW3 file (`SPEC.md`, offset 0).
 pub const MAGIC: [u8; 4] = *b"TUW3";
