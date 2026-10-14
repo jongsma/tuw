@@ -3,7 +3,8 @@
 - **Issue:** #13
 - **Status:** In progress
 - **Crates:** tuw3
-- **Format change:** yes (`SPEC.md` gains the duplicate-key rule; version bump: no)
+- **Format change:** yes (`SPEC.md` gains the duplicate-key rule (D12) and bounded JSON (D13);
+  version bump: no)
 
 ---
 
@@ -40,12 +41,14 @@ privately and written back unchanged in content; they are not exposed in the API
 `Metadata::default()` is empty. A known field must be a JSON string when present: `null`, a
 number or any other type is a wrong type (absent and `null` are not the same).
 
-**Reading.** `read(bytes: &[u8]) -> Result<Table, ReadError>` rejects every case in the spec's
-*Reading a file* section, and also four kinds of spec-valid metadata that this reader cannot
-represent or write back (see *Notes*). It checks the fixed header and the exact file length
-before it allocates anything sized by the header, so a forged header cannot cause a large
-allocation. Each failure is a distinct error variant with context (for example the field, value
-and allowed range, or the `(y, z, x)` position of a non-finite sample).
+**Reading.** `read(bytes: &[u8]) -> Result<Table, ReadError>` accepts exactly the files the spec
+allows and rejects every case in the spec's *Reading a file* section. The one exception is the
+one the spec permits: valid metadata that would exceed 1 MiB once re-encoded is reported as
+unsupported (`ReadError::MetadataGrowsTooLong`, see *Notes*). It checks the fixed header and
+the exact file length before it allocates anything sized by the header, so a forged header
+cannot cause a large allocation. Each failure is a distinct error variant with context (for
+example the field, value and allowed range, or the `(y, z, x)` position of a non-finite
+sample).
 
 **Writing.** `write(table: &Table) -> Vec<u8>` cannot fail. Its output is deterministic:
 
@@ -2860,17 +2863,14 @@ git commit -m "docs(tuw3): add crate example and update feature doc"
 
 Things learned during implementation; spec changes made along the way.
 
-- **`read` rejects four kinds of spec-valid metadata.** Each gives a clear error:
-  1. JSON numbers outside the `f64` range (such as `1e400`). RFC 8259 §6 lets implementations
-     limit number range; `serde_json` reports `Metadata(InvalidJson)`.
-  2. JSON nested more than 128 levels deep (the `serde_json` limit): `Metadata(InvalidJson)`.
-  3. Strings containing a lone UTF-16 surrogate escape (such as `"\ud800"`), which cannot be a
-     Rust `String`: `Metadata(InvalidJson)`.
-  4. Metadata under 1 MiB whose canonical re-written form is over 1 MiB (for example many
-     `1e5`, written back as `100000.0`): `Table(MetadataTooLong)`, because the table could not be
-     written back.
-
-  Open issue for the maintainer: `SPEC.md` *Size limits* says a reader with its own limits "must
-  then report the file as unsupported", but `read` reports these as invalid metadata (or
-  `MetadataTooLong`). Whether to add an "unsupported" error or to bound the JSON in `SPEC.md` is
-  not decided.
+- **Bounded JSON in the metadata (D13, final review, Oct 2026).** The final review found that
+  `read` rejected four kinds of metadata the spec allowed, and reported them as invalid while
+  *Size limits* requires "unsupported". Settled by bounding the JSON in `SPEC.md`:
+  1. Numbers outside the `f64` range (such as `1e400`) are now invalid: `Metadata(InvalidJson)`.
+  2. Nesting deeper than 64 levels is now invalid: `Metadata(NestedTooDeeply)`. The crate checks
+     this itself (`limits::MAX_META_DEPTH`), before `serde_json`'s own limit of 128.
+  3. Lone UTF-16 surrogate escapes (such as `"\ud800"`) are now invalid: `Metadata(InvalidJson)`.
+  4. Re-encoding growth (many `1e5`, written back as `100000.0`, pushing the block over 1 MiB)
+     cannot be a tool-independent rule, because it depends on how a tool spells numbers. The
+     spec lets a reader report it as unsupported, and `read` returns
+     `ReadError::MetadataGrowsTooLong`.

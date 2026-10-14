@@ -2,7 +2,7 @@
 
 //! [`read`]: bytes to [`Table`], following *Reading a file* in `SPEC.md`.
 
-use crate::error::ReadError;
+use crate::error::{ReadError, TableError};
 use crate::layout;
 use crate::limits::MAX_META_LEN;
 use crate::metadata::Metadata;
@@ -17,16 +17,10 @@ use crate::{FIXED_HEADER_LEN, MAGIC, VERSION};
 ///
 /// # Errors
 ///
-/// Returns a [`ReadError`] for every case listed under *Reading a file* in `SPEC.md`.
-/// It also rejects four kinds of metadata that the spec allows, because this reader cannot
-/// represent them or could not write them back:
-///
-/// - JSON numbers outside the `f64` range, such as `1e400`: `Metadata(InvalidJson)`.
-/// - JSON nested more than 128 levels deep (the limit of `serde_json`):
-///   `Metadata(InvalidJson)`.
-/// - Strings with a lone UTF-16 surrogate escape, such as `"\ud800"`: `Metadata(InvalidJson)`.
-/// - Metadata whose canonical re-written form exceeds 1 MiB (`1e5` is written back as
-///   `100000.0`): `Table(MetadataTooLong)`.
+/// Returns a [`ReadError`] for every case listed under *Reading a file* in `SPEC.md`, and
+/// [`ReadError::MetadataGrowsTooLong`] for valid metadata that would no longer fit in 1 MiB
+/// once re-encoded (`1e5` is written back as `100000.0`), which the spec lets a reader
+/// report as unsupported.
 ///
 /// # Example
 ///
@@ -94,7 +88,11 @@ pub fn read(bytes: &[u8]) -> Result<Table, ReadError> {
         .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
         .collect();
-    Ok(Table::new(frame_size, y_size, z_size, samples, metadata)?)
+    Table::new(frame_size, y_size, z_size, samples, metadata).map_err(|error| match error {
+        // `meta_len` was within the limit, so only the re-encoding can have made it too long.
+        TableError::MetadataTooLong { len } => ReadError::MetadataGrowsTooLong { len },
+        other => ReadError::Table(other),
+    })
 }
 
 /// The little-endian u16 at `offset`. The caller has checked that it is in bounds.

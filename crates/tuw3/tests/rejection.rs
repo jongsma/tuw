@@ -6,6 +6,7 @@
 mod common;
 
 use common::RawFile;
+use tuw3::limits::MAX_META_DEPTH;
 use tuw3::{MetadataError, ReadError, SizeField, TableError};
 
 fn read(raw: &RawFile) -> Result<tuw3::Table, ReadError> {
@@ -222,24 +223,50 @@ fn non_finite_sample_is_rejected() {
     );
 }
 
-// Review focus: hostile or unusual metadata must give an error, never a crash.
+// Metadata the spec bounds beyond plain JSON (D13), and hostile metadata: an error, never a
+// crash.
 
-#[test]
-fn deeply_nested_metadata_is_rejected_without_stack_overflow() {
-    let depth = 100_000;
-    let json = format!("{{\"x\":{}{}}}", "[".repeat(depth), "]".repeat(depth));
-    let mut raw = RawFile::valid();
-    raw.metadata = json.into_bytes();
-    assert!(matches!(
-        read(&raw).unwrap_err(),
-        ReadError::Metadata(MetadataError::InvalidJson(_))
-    ));
+/// Metadata nested `depth` levels deep: the top-level object plus `depth - 1` arrays.
+fn nested(depth: usize) -> Vec<u8> {
+    format!(
+        "{{\"x\":{}{}}}",
+        "[".repeat(depth - 1),
+        "]".repeat(depth - 1)
+    )
+    .into_bytes()
 }
 
 #[test]
-fn unrepresentable_json_is_rejected() {
-    // A lone UTF-16 surrogate cannot be a Rust string; 1e400 does not fit in an f64.
-    for json in [&br#"{"x":"\ud800"}"#[..], br#"{"x":1e400}"#] {
+fn nesting_up_to_the_limit_is_accepted() {
+    let mut raw = RawFile::valid();
+    raw.metadata = nested(MAX_META_DEPTH as usize);
+    assert!(read(&raw).is_ok());
+}
+
+#[test]
+fn nesting_beyond_the_limit_is_rejected() {
+    // Just past the limit, past serde_json's own limit of 128, and far past it (which would
+    // overflow the stack without a limit).
+    for depth in [MAX_META_DEPTH as usize + 1, 200, 100_000] {
+        let mut raw = RawFile::valid();
+        raw.metadata = nested(depth);
+        assert_eq!(
+            read(&raw).unwrap_err(),
+            ReadError::Metadata(MetadataError::NestedTooDeeply),
+            "depth {depth}"
+        );
+    }
+}
+
+#[test]
+fn lone_surrogates_and_out_of_range_numbers_are_rejected() {
+    // Lone high and low UTF-16 surrogates cannot be text; 1e400 does not fit in an f64.
+    for json in [
+        &br#"{"x":"\ud800"}"#[..],
+        br#"{"x":"\udc00"}"#,
+        br#"{"x":1e400}"#,
+        br#"{"x":-1e400}"#,
+    ] {
         let mut raw = RawFile::valid();
         raw.metadata = json.to_vec();
         assert!(
@@ -253,17 +280,25 @@ fn unrepresentable_json_is_rejected() {
     }
 }
 
-/// A file's metadata is within 1 MiB, but its canonical form is not (`1e5` is re-written as
-/// `100000.0`). The table could not be written back, so `read` reports it instead of
-/// accepting a table that `write` cannot store.
 #[test]
-fn metadata_that_grows_beyond_the_limit_when_canonicalised_is_rejected() {
+fn surrogate_pairs_and_tiny_numbers_are_accepted() {
+    // A correctly paired surrogate is one character; 1e-400 rounds to zero, which is in range.
+    let mut raw = RawFile::valid();
+    raw.metadata = br#"{"x":"\ud83c\udfb5","y":1e-400}"#.to_vec();
+    assert!(read(&raw).is_ok());
+}
+
+/// A file's metadata is within 1 MiB, but its re-encoded form is not (`1e5` is re-written as
+/// `100000.0`). The table could not be written back, so `read` reports the file as
+/// unsupported instead of returning a table that `write` cannot store.
+#[test]
+fn metadata_that_grows_beyond_the_limit_when_re_encoded_is_unsupported() {
     let json = format!("{{\"x\":[{}]}}", vec!["1e5"; 260_000].join(","));
     assert!(json.len() <= 1 << 20);
     let mut raw = RawFile::valid();
     raw.metadata = json.into_bytes();
     assert!(matches!(
         read(&raw).unwrap_err(),
-        ReadError::Table(TableError::MetadataTooLong { .. })
+        ReadError::MetadataGrowsTooLong { len } if len > 1 << 20
     ));
 }

@@ -22,3 +22,7 @@ pub const MAX_TOTAL_SAMPLES: u64 = 1 << 28;
 
 /// Largest allowed `meta_len`, in bytes: 1 MiB.
 pub const MAX_META_LEN: u32 = 1 << 20;
+
+/// Deepest allowed nesting of JSON objects and arrays in the metadata. The top-level object is
+/// level 1, so `{"a":[{}]}` is nested 3 levels deep.
+pub const MAX_META_DEPTH: u32 = 64;

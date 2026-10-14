@@ -122,6 +122,9 @@ pub enum MetadataError {
         /// The repeated key.
         key: String,
     },
+    /// Objects and arrays are nested deeper than
+    /// [`MAX_META_DEPTH`](crate::limits::MAX_META_DEPTH) levels.
+    NestedTooDeeply,
 }
 
 impl fmt::Display for MetadataError {
@@ -136,6 +139,11 @@ impl fmt::Display for MetadataError {
             MetadataError::DuplicateKey { key } => {
                 write!(f, "metadata key {key:?} occurs more than once")
             }
+            MetadataError::NestedTooDeeply => write!(
+                f,
+                "metadata is nested more than {} levels deep",
+                crate::limits::MAX_META_DEPTH
+            ),
         }
     }
 }
@@ -187,6 +195,14 @@ pub enum ReadError {
     Metadata(MetadataError),
     /// The sizes or samples do not form a valid table.
     Table(TableError),
+    /// The metadata is valid, but re-encoded by this crate (for example `1e5` as `100000.0`)
+    /// it is longer than [`MAX_META_LEN`](crate::limits::MAX_META_LEN), so the table could
+    /// not be written back. `SPEC.md` (*Metadata*) lets a reader report such a file as
+    /// unsupported.
+    MetadataGrowsTooLong {
+        /// Length of the re-encoded metadata in bytes.
+        len: u64,
+    },
 }
 
 impl fmt::Display for ReadError {
@@ -224,6 +240,11 @@ impl fmt::Display for ReadError {
             }
             ReadError::Metadata(error) => error.fmt(f),
             ReadError::Table(error) => error.fmt(f),
+            ReadError::MetadataGrowsTooLong { len } => write!(
+                f,
+                "unsupported metadata: re-encoded it is {len} bytes, the maximum is {}",
+                crate::limits::MAX_META_LEN
+            ),
         }
     }
 }

@@ -178,3 +178,18 @@ files exist yet.
 take the first value, some the last, some reject the file. One file could then mean different
 things in different tools, for example `"license"` given twice with a free and a non-free
 licence. As with trailing bytes (D11), data with two meanings is rejected.
+
+## D13. TUW3 metadata: bounded JSON (Oct 2026)
+
+**Decision:** valid metadata is nested at most 64 levels deep, has only numbers that fit in a
+64-bit float, and has no unpaired surrogate escapes; anything else makes the file invalid.
+A reader may report a file as unsupported when its re-encoded metadata would exceed 1 MiB.
+No `version` bump: the format is still at version 0 and no files exist yet.
+
+**Why:** RFC 8259 allows all of these but lets parsers limit them (§6, §8.2, §9), and common
+parsers do: many stop at 128 levels or fewer, read numbers as 64-bit floats and cannot hold a
+lone surrogate in a string. Left open, a file could load in one tool and fail in another. As
+with duplicate keys (D12), the spec bounds the JSON so that "valid" means the same in every
+tool. Numbers and nesting are bounded well past anything a wavetable's metadata needs.
+Re-encoding growth cannot be written as a tool-independent rule, because it depends on how a
+tool spells numbers, so it uses the existing *Size limits* rule: report as unsupported.

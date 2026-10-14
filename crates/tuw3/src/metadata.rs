@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The metadata block (`SPEC.md`, *Metadata*): parsing with duplicate-key detection, and
+//! The metadata block (`SPEC.md`, *Metadata*): parsing with duplicate-key and depth checks, and
 //! deterministic serialisation.
 
 use std::cell::Cell;
@@ -10,6 +10,7 @@ use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Number, Value};
 
 use crate::error::MetadataError;
+use crate::limits::MAX_META_DEPTH;
 
 /// Descriptive information about a table. Every field is optional.
 ///
@@ -60,7 +61,7 @@ impl Metadata {
             return Ok(Metadata::default());
         }
         let text = std::str::from_utf8(bytes).map_err(|_| MetadataError::NotUtf8)?;
-        let Value::Object(mut object) = parse_rejecting_duplicates(text)? else {
+        let Value::Object(mut object) = parse_checked(text)? else {
             return Err(MetadataError::NotAnObject);
         };
 
@@ -172,30 +173,55 @@ fn sorted_entries(object: &Map<String, Value>) -> Vec<(&str, &Value)> {
     entries
 }
 
-/// Parses JSON text into a `Value`, rejecting duplicate keys at every nesting level.
+/// Parses JSON text into a `Value`, rejecting duplicate keys and nesting deeper than
+/// [`MAX_META_DEPTH`] (`SPEC.md`, *Metadata*).
 ///
 /// `serde_json` on its own silently keeps the last of two equal keys, so the parse goes
 /// through [`ValueSeed`], which checks each object as it is built. serde's error type cannot
-/// carry our own error, so the duplicate key is passed out through a `Cell`.
-fn parse_rejecting_duplicates(text: &str) -> Result<Value, MetadataError> {
-    let duplicate = Cell::new(None);
+/// carry our own error, so the problem found is passed out through a `Cell`.
+fn parse_checked(text: &str) -> Result<Value, MetadataError> {
+    let problem = Cell::new(None);
     let mut deserializer = serde_json::Deserializer::from_str(text);
     let parsed = ValueSeed {
-        duplicate: &duplicate,
+        problem: &problem,
+        depth: 1,
     }
     .deserialize(&mut deserializer)
     .and_then(|value| deserializer.end().map(|()| value));
-    match (parsed, duplicate.take()) {
-        (_, Some(key)) => Err(MetadataError::DuplicateKey { key }),
+    match (parsed, problem.take()) {
+        (_, Some(error)) => Err(error),
         (Ok(value), None) => Ok(value),
         (Err(error), None) => Err(MetadataError::InvalidJson(error.to_string())),
     }
 }
 
-/// Deserialises one JSON value of any type, recording the first duplicate key it meets.
+/// Deserialises one JSON value of any type, recording the first duplicate key or
+/// too-deep nesting it meets.
 #[derive(Clone, Copy)]
 struct ValueSeed<'a> {
-    duplicate: &'a Cell<Option<String>>,
+    problem: &'a Cell<Option<MetadataError>>,
+    /// Nesting level of the value: 1 for the top-level object.
+    depth: u32,
+}
+
+impl ValueSeed<'_> {
+    /// The seed for the elements of an array or the values of an object.
+    fn inner(self) -> Self {
+        ValueSeed {
+            depth: self.depth + 1,
+            ..self
+        }
+    }
+
+    /// Fails if an array or object at this level is nested too deeply. Checking here, before
+    /// serde_json's own limit of 128 is reached, makes the limit the spec's, not the parser's.
+    fn check_depth<E: de::Error>(self) -> Result<(), E> {
+        if self.depth > MAX_META_DEPTH {
+            self.problem.set(Some(MetadataError::NestedTooDeeply));
+            return Err(E::custom("nested too deeply"));
+        }
+        Ok(())
+    }
 }
 
 impl<'de> DeserializeSeed<'de> for ValueSeed<'_> {
@@ -245,21 +271,23 @@ impl<'de> Visitor<'de> for ValueSeed<'_> {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        self.check_depth()?;
         let mut items = Vec::new();
-        while let Some(item) = seq.next_element_seed(self)? {
+        while let Some(item) = seq.next_element_seed(self.inner())? {
             items.push(item);
         }
         Ok(Value::Array(items))
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        self.check_depth()?;
         let mut object = Map::new();
         while let Some(key) = map.next_key::<String>()? {
             if object.contains_key(&key) {
-                self.duplicate.set(Some(key));
+                self.problem.set(Some(MetadataError::DuplicateKey { key }));
                 return Err(de::Error::custom("duplicate key"));
             }
-            let value = map.next_value_seed(self)?;
+            let value = map.next_value_seed(self.inner())?;
             object.insert(key, value);
         }
         Ok(Value::Object(object))
