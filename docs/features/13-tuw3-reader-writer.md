@@ -1,7 +1,7 @@
 # TUW3 reader and writer (version 0)
 
 - **Issue:** #13
-- **Status:** Planned
+- **Status:** In progress
 - **Crates:** tuw3
 - **Format change:** yes (`SPEC.md` gains the duplicate-key rule; version bump: no)
 
@@ -41,7 +41,7 @@ privately and written back unchanged in content; they are not exposed in the API
 number or any other type is a wrong type (absent and `null` are not the same).
 
 **Reading.** `read(bytes: &[u8]) -> Result<Table, ReadError>` accepts exactly the files the spec
-allows and rejects every case in the spec's *Reading a file* section. It checks the fixed header
+allows, with two documented exceptions (see *Notes*), and rejects every case in the spec's *Reading a file* section. It checks the fixed header
 and the exact file length before it allocates anything sized by the header, so a forged header
 cannot cause a large allocation. Each failure is a distinct error variant with context (for
 example the field, value and allowed range, or the `(y, z, x)` position of a non-finite sample).
@@ -84,38 +84,38 @@ different things in different tools, e.g. two `license` values) goes into `DECIS
 Tests are written before the code. Float comparisons in these tests use `f32::to_bits`: the
 format does no arithmetic, so every bit must survive, and `==` would equate `-0.0` and `0.0`.
 
-- [ ] **AC1 (layout):** `write` of a small hand-built table produces exactly the bytes assembled
+- [x] **AC1 (layout):** `write` of a small hand-built table produces exactly the bytes assembled
       in the test from the `SPEC.md` layout table (header, metadata, padding, samples), and
       `read` of those bytes returns that table.
-- [ ] **AC2 (alignment):** for every `meta_len` from 0 to 64, the sample block starts at a
+- [x] **AC2 (alignment):** for every `meta_len` from 0 to 64, the sample block starts at a
       multiple of 16 and the padding is at most 15 zero bytes.
-- [ ] **AC3 (frame order):** in a table whose samples encode their own `(y, z, x)`,
+- [x] **AC3 (frame order):** in a table whose samples encode their own `(y, z, x)`,
       `frame(y, z)` returns the right frame for every position, including the last frame on
       each axis; positions outside the grid return `None`.
-- [ ] **AC4 (round trip):** `read(write(t))` returns `t` for: `y_size = 1`, `z_size = 1`, both 1,
+- [x] **AC4 (round trip):** `read(write(t))` returns `t` for: `y_size = 1`, `z_size = 1`, both 1,
       `frame_size` 8 and 600; samples including `-0.0`, subnormals and `±f32::MAX`; metadata that
       is empty, complete, contains Unicode and escapes, and contains nested unknown keys.
-- [ ] **AC5 (determinism):** writing the same table twice gives identical bytes; empty metadata
+- [x] **AC5 (determinism):** writing the same table twice gives identical bytes; empty metadata
       gives `meta_len = 0`; known fields appear in spec order before unknown keys, which are
       sorted.
-- [ ] **AC6 (table validity):** `Table::new` rejects, each with its own `TableError`: every
+- [x] **AC6 (table validity):** `Table::new` rejects, each with its own `TableError`: every
       dimension just outside its limit (and accepts the limit itself), a total above 2²⁸
       samples, a wrong sample count, NaN, +Inf and −Inf (including at the last sample), and
       metadata that serialises to more than 1 MiB.
-- [ ] **AC7 (rejection):** `read` returns the matching `ReadError` for each case in the spec's
+- [x] **AC7 (rejection):** `read` returns the matching `ReadError` for each case in the spec's
       *Reading a file*: too short, bad magic, version ≠ 0, any flag bit set, sizes out of range,
       `meta_len` over 1 MiB, truncated, trailing bytes, non-zero padding, metadata that is not
       UTF-8 / not JSON / not an object / has a known field of the wrong type (including `null`),
       non-finite sample.
-- [ ] **AC8 (forged header):** a 24-byte file whose header claims the maximum sizes is rejected
+- [x] **AC8 (forged header):** a 24-byte file whose header claims the maximum sizes is rejected
       as truncated, without allocating memory sized by the header.
-- [ ] **AC9 (duplicate keys):** metadata with a duplicate key, at the top level or inside a
+- [x] **AC9 (duplicate keys):** metadata with a duplicate key, at the top level or inside a
       nested unknown value, is rejected; `SPEC.md` and `DECISIONS.md` state the rule.
-- [ ] **AC10 (unknown keys):** unknown keys of any JSON type survive `read` → `write` → `read`
+- [x] **AC10 (unknown keys):** unknown keys of any JSON type survive `read` → `write` → `read`
       with the same content.
-- [ ] **AC11 (robustness):** property tests (`proptest`): random valid tables always round-trip,
+- [x] **AC11 (robustness):** property tests (`proptest`): random valid tables always round-trip,
       and `read` on random bytes never panics.
-- [ ] **AC12 (crate rules):** `tuw3` has no I/O, DSP, GUI or plugin code; its only new runtime
+- [x] **AC12 (crate rules):** `tuw3` has no I/O, DSP, GUI or plugin code; its only new runtime
       dependency is `serde_json` (with `serde`); `proptest` is a dev-dependency only;
       `cargo deny check` passes; every public item has a doc comment.
 

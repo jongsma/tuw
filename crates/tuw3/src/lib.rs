@@ -10,7 +10,20 @@
 //! Points still open in the spec are tracked as GitHub issues and must not be decided
 //! silently in code.
 //!
-//! This crate deliberately has no DSP, GUI or plugin dependencies.
+//! This crate deliberately has no DSP, GUI or plugin dependencies, and does no I/O: it turns
+//! bytes into a [`Table`] and back, and the caller reads or writes the file.
+//!
+//! ```
+//! let mut metadata = tuw3::Metadata::default();
+//! metadata.name = Some("Saw".to_owned());
+//! let samples: Vec<f32> = (0..8).map(|x| x as f32 / 4.0 - 1.0).collect();
+//! let table = tuw3::Table::new(8, 1, 1, samples, metadata)?;
+//!
+//! let bytes = tuw3::write(&table);
+//! let back = tuw3::read(&bytes)?;
+//! assert_eq!(back.metadata().name.as_deref(), Some("Saw"));
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
