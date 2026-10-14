@@ -113,6 +113,8 @@ Known fields, all optional:
 | `description` | string | Free text |
 
 - A known field with a value of the wrong type makes the file invalid.
+- Keys must be unique within every JSON object, at every nesting level. A file with a duplicate
+  key is invalid.
 - Readers must ignore unknown keys. Editors should preserve them when re-saving the file.
 
 Example:

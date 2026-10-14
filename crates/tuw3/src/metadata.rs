@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The metadata block (`SPEC.md`, *Metadata*): deterministic serialisation.
+//! The metadata block (`SPEC.md`, *Metadata*): parsing with duplicate-key detection, and
+//! deterministic serialisation.
 
-use serde_json::{Map, Value};
+use std::cell::Cell;
+use std::fmt;
+
+use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
+use serde_json::{Map, Number, Value};
+
+use crate::error::MetadataError;
 
 /// Descriptive information about a table. Every field is optional.
 ///
@@ -45,6 +52,44 @@ impl Metadata {
             ("z_label", &self.z_label),
             ("description", &self.description),
         ]
+    }
+
+    /// Parses a metadata block. An empty block means "no metadata".
+    #[allow(dead_code)] // used by `read`, added in the next task
+    pub(crate) fn from_json(bytes: &[u8]) -> Result<Metadata, MetadataError> {
+        if bytes.is_empty() {
+            return Ok(Metadata::default());
+        }
+        let text = std::str::from_utf8(bytes).map_err(|_| MetadataError::NotUtf8)?;
+        let Value::Object(mut object) = parse_rejecting_duplicates(text)? else {
+            return Err(MetadataError::NotAnObject);
+        };
+
+        // Take each known field out of the object; whatever is left is unknown.
+        let mut take = |key: &str| match object.remove(key) {
+            None => Ok(None),
+            Some(Value::String(text)) => Ok(Some(text)),
+            // `null`, numbers, arrays, ...: a known field must be a string when present.
+            Some(_) => Err(MetadataError::WrongType {
+                key: key.to_owned(),
+            }),
+        };
+        let name = take("name")?;
+        let author = take("author")?;
+        let license = take("license")?;
+        let y_label = take("y_label")?;
+        let z_label = take("z_label")?;
+        let description = take("description")?;
+
+        Ok(Metadata {
+            name,
+            author,
+            license,
+            y_label,
+            z_label,
+            description,
+            extra: object,
+        })
     }
 
     /// Serialises to compact JSON: known fields in spec order (`None` left out), then unknown
@@ -128,13 +173,128 @@ fn sorted_entries(object: &Map<String, Value>) -> Vec<(&str, &Value)> {
     entries
 }
 
+/// Parses JSON text into a `Value`, rejecting duplicate keys at every nesting level.
+///
+/// `serde_json` on its own silently keeps the last of two equal keys, so the parse goes
+/// through [`ValueSeed`], which checks each object as it is built. serde's error type cannot
+/// carry our own error, so the duplicate key is passed out through a `Cell`.
+fn parse_rejecting_duplicates(text: &str) -> Result<Value, MetadataError> {
+    let duplicate = Cell::new(None);
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    let parsed = ValueSeed {
+        duplicate: &duplicate,
+    }
+    .deserialize(&mut deserializer)
+    .and_then(|value| deserializer.end().map(|()| value));
+    match (parsed, duplicate.take()) {
+        (_, Some(key)) => Err(MetadataError::DuplicateKey { key }),
+        (Ok(value), None) => Ok(value),
+        (Err(error), None) => Err(MetadataError::InvalidJson(error.to_string())),
+    }
+}
+
+/// Deserialises one JSON value of any type, recording the first duplicate key it meets.
+#[derive(Clone, Copy)]
+struct ValueSeed<'a> {
+    duplicate: &'a Cell<Option<String>>,
+}
+
+impl<'de> DeserializeSeed<'de> for ValueSeed<'_> {
+    type Value = Value;
+
+    fn deserialize<D: de::Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for ValueSeed<'_> {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("any JSON value")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Value, E> {
+        Ok(Value::Bool(value))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Value, E> {
+        Ok(Value::from(value))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Value, E> {
+        Ok(Value::from(value))
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Value, E> {
+        // JSON text cannot express NaN or infinity, so this only fails on a parser bug.
+        Number::from_f64(value)
+            .map(Value::Number)
+            .ok_or_else(|| E::custom("number is not finite"))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Value, E> {
+        Ok(Value::String(value.to_owned()))
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Value, E> {
+        Ok(Value::String(value))
+    }
+
+    fn visit_unit<E>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        let mut items = Vec::new();
+        while let Some(item) = seq.next_element_seed(self)? {
+            items.push(item);
+        }
+        Ok(Value::Array(items))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        let mut object = Map::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if object.contains_key(&key) {
+                self.duplicate.set(Some(key));
+                return Err(de::Error::custom("duplicate key"));
+            }
+            let value = map.next_value_seed(self)?;
+            object.insert(key, value);
+        }
+        Ok(Value::Object(object))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn empty_metadata_is_an_empty_block() {
+    fn empty_block_is_empty_metadata() {
+        assert_eq!(Metadata::from_json(b""), Ok(Metadata::default()));
         assert_eq!(Metadata::default().to_json(), b"");
+    }
+
+    #[test]
+    fn known_fields_are_written_in_spec_order_before_sorted_unknown_keys() {
+        let metadata =
+            Metadata::from_json(br#"{"zz":1,"description":"d","aa":{"b":2,"a":1},"name":"n"}"#)
+                .unwrap();
+        assert_eq!(
+            String::from_utf8(metadata.to_json()).unwrap(),
+            r#"{"name":"n","description":"d","aa":{"a":1,"b":2},"zz":1}"#
+        );
+    }
+
+    #[test]
+    fn empty_string_is_written() {
+        let metadata = Metadata {
+            name: Some(String::new()),
+            ..Metadata::default()
+        };
+        assert_eq!(metadata.to_json(), br#"{"name":""}"#);
     }
 
     #[test]
@@ -152,15 +312,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_string_is_written() {
-        let metadata = Metadata {
-            name: Some(String::new()),
-            ..Metadata::default()
-        };
-        assert_eq!(metadata.to_json(), br#"{"name":""}"#);
-    }
-
-    #[test]
     fn characters_are_escaped() {
         let metadata = Metadata {
             name: Some("\"\\\n\u{0}é".to_owned()),
@@ -169,6 +320,57 @@ mod tests {
         assert_eq!(
             String::from_utf8(metadata.to_json()).unwrap(),
             r#"{"name":"\"\\\n\u0000é"}"#
+        );
+    }
+
+    #[test]
+    fn duplicate_keys_are_rejected_at_any_depth() {
+        let top = Metadata::from_json(br#"{"license":"CC0-1.0","license":"x"}"#);
+        assert_eq!(
+            top,
+            Err(MetadataError::DuplicateKey {
+                key: "license".to_owned()
+            })
+        );
+        let nested = Metadata::from_json(br#"{"tool":[{"a":1,"a":2}]}"#);
+        assert_eq!(
+            nested,
+            Err(MetadataError::DuplicateKey {
+                key: "a".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn known_field_must_be_a_string() {
+        for json in [r#"{"name":null}"#, r#"{"name":5}"#, r#"{"name":["a"]}"#] {
+            assert_eq!(
+                Metadata::from_json(json.as_bytes()),
+                Err(MetadataError::WrongType {
+                    key: "name".to_owned()
+                }),
+                "{json}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_blocks_are_rejected() {
+        assert_eq!(
+            Metadata::from_json(&[0xff, 0xfe]),
+            Err(MetadataError::NotUtf8)
+        );
+        assert!(matches!(
+            Metadata::from_json(b"{\"name\":"),
+            Err(MetadataError::InvalidJson(_))
+        ));
+        assert!(matches!(
+            Metadata::from_json(b"{} {}"),
+            Err(MetadataError::InvalidJson(_))
+        ));
+        assert_eq!(
+            Metadata::from_json(b"[1,2]"),
+            Err(MetadataError::NotAnObject)
         );
     }
 }

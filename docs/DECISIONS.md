@@ -167,3 +167,14 @@ well-bounded editor feature (3D view, import flow, undo) if the lite version fal
   writer bug, an unknown newer format or hidden data; none of these should be accepted
   silently. Rejecting NaN/Inf at load time means a player never has to check samples on the
   audio thread.
+
+## D12. TUW3 metadata: duplicate keys are invalid (Oct 2026)
+
+**Decision:** a metadata block in which any JSON object, at any nesting level, has the same
+key twice makes the file invalid. No `version` bump: the format is still at version 0 and no
+files exist yet.
+
+**Why:** RFC 8259 only says keys *should* be unique and leaves duplicates to the parser: some
+take the first value, some the last, some reject the file. One file could then mean different
+things in different tools, for example `"license"` given twice with a free and a non-free
+licence. As with trailing bytes (D11), data with two meanings is rejected.
