@@ -40,11 +40,12 @@ privately and written back unchanged in content; they are not exposed in the API
 `Metadata::default()` is empty. A known field must be a JSON string when present: `null`, a
 number or any other type is a wrong type (absent and `null` are not the same).
 
-**Reading.** `read(bytes: &[u8]) -> Result<Table, ReadError>` accepts exactly the files the spec
-allows, with two documented exceptions (see *Notes*), and rejects every case in the spec's *Reading a file* section. It checks the fixed header
-and the exact file length before it allocates anything sized by the header, so a forged header
-cannot cause a large allocation. Each failure is a distinct error variant with context (for
-example the field, value and allowed range, or the `(y, z, x)` position of a non-finite sample).
+**Reading.** `read(bytes: &[u8]) -> Result<Table, ReadError>` rejects every case in the spec's
+*Reading a file* section, and also four kinds of spec-valid metadata that this reader cannot
+represent or write back (see *Notes*). It checks the fixed header and the exact file length
+before it allocates anything sized by the header, so a forged header cannot cause a large
+allocation. Each failure is a distinct error variant with context (for example the field, value
+and allowed range, or the `(y, z, x)` position of a non-finite sample).
 
 **Writing.** `write(table: &Table) -> Vec<u8>` cannot fail. Its output is deterministic:
 
@@ -2859,12 +2860,17 @@ git commit -m "docs(tuw3): add crate example and update feature doc"
 
 Things learned during implementation; spec changes made along the way.
 
-- **Found while prototyping the plan (Oct 2026): `read` rejects two kinds of spec-valid files.**
-  The spec allows a reader to impose its own limits if it reports the file as unsupported
-  (*Size limits*), and both cases give a clear error, but they are exceptions to "accepts
-  exactly the files the spec allows" in *Behaviour*:
-  1. JSON numbers outside the `f64` range (such as `1e400`). RFC 8259 §6 lets
-     implementations limit number range; `serde_json` reports `InvalidJson`.
-  2. Metadata under 1 MiB whose canonical re-written form is over 1 MiB (for example many
-     `1e5`, written back as `100000.0`). `read` reports `Table(MetadataTooLong)`, because the
-     table could not be written back.
+- **`read` rejects four kinds of spec-valid metadata.** Each gives a clear error:
+  1. JSON numbers outside the `f64` range (such as `1e400`). RFC 8259 §6 lets implementations
+     limit number range; `serde_json` reports `Metadata(InvalidJson)`.
+  2. JSON nested more than 128 levels deep (the `serde_json` limit): `Metadata(InvalidJson)`.
+  3. Strings containing a lone UTF-16 surrogate escape (such as `"\ud800"`), which cannot be a
+     Rust `String`: `Metadata(InvalidJson)`.
+  4. Metadata under 1 MiB whose canonical re-written form is over 1 MiB (for example many
+     `1e5`, written back as `100000.0`): `Table(MetadataTooLong)`, because the table could not be
+     written back.
+
+  Open issue for the maintainer: `SPEC.md` *Size limits* says a reader with its own limits "must
+  then report the file as unsupported", but `read` reports these as invalid metadata (or
+  `MetadataTooLong`). Whether to add an "unsupported" error or to bound the JSON in `SPEC.md` is
+  not decided.

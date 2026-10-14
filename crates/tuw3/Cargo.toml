@@ -15,6 +15,11 @@ publish.workspace = true
 # Keep this crate light: no DSP, GUI or plugin dependencies, so any tool can use it.
 [dependencies]
 serde = "1.0.229"
+# The metadata parser relies on serde_json's default features. Feature unification can enable
+# more from any crate in the build: `arbitrary_precision` would change how numbers reach the
+# visitor, and `unbounded_depth` would remove the nesting limit. The tests
+# `unknown_numbers_keep_their_value` (tests/round_trip.rs) and
+# `deeply_nested_metadata_is_rejected_without_stack_overflow` (tests/rejection.rs) guard this.
 serde_json = "1.0.154"
 
 [lints]

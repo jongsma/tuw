@@ -131,10 +131,10 @@ impl fmt::Display for MetadataError {
             MetadataError::InvalidJson(reason) => write!(f, "metadata is not valid JSON: {reason}"),
             MetadataError::NotAnObject => f.write_str("metadata is not a JSON object"),
             MetadataError::WrongType { key } => {
-                write!(f, "metadata field \"{key}\" must be a string")
+                write!(f, "metadata field {key:?} must be a string")
             }
             MetadataError::DuplicateKey { key } => {
-                write!(f, "metadata key \"{key}\" occurs more than once")
+                write!(f, "metadata key {key:?} occurs more than once")
             }
         }
     }
@@ -273,6 +273,15 @@ mod tests {
         assert_eq!(
             duplicate.to_string(),
             "metadata key \"license\" occurs more than once"
+        );
+
+        // Untrusted keys are shown escaped, so control characters cannot reach a terminal.
+        let escaped = ReadError::Metadata(MetadataError::DuplicateKey {
+            key: "a\u{1b}[2J".to_owned(),
+        });
+        assert_eq!(
+            escaped.to_string(),
+            "metadata key \"a\\u{1b}[2J\" occurs more than once"
         );
 
         let magic = ReadError::BadMagic { found: *b"RIFF" };

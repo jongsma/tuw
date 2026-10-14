@@ -331,6 +331,14 @@ mod tests {
                 key: "license".to_owned()
             })
         );
+        // The second key is spelled with a JSON escape (`\u0061` is "a").
+        let escaped = Metadata::from_json(br#"{"a":1,"\u0061":2}"#);
+        assert_eq!(
+            escaped,
+            Err(MetadataError::DuplicateKey {
+                key: "a".to_owned()
+            })
+        );
         let nested = Metadata::from_json(br#"{"tool":[{"a":1,"a":2}]}"#);
         assert_eq!(
             nested,

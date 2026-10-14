@@ -11,13 +11,22 @@ use crate::{FIXED_HEADER_LEN, MAGIC, VERSION};
 
 /// Reads a TUW3 file from its bytes.
 ///
-/// Accepts exactly the files `SPEC.md` allows. The header and the file length are checked
-/// before anything sized by the header is allocated, so a forged header cannot make this
-/// function reserve more memory than the input itself.
+/// The header and the file length are checked before anything sized by the header is
+/// allocated, so a forged header cannot make this function reserve more memory than the
+/// input itself.
 ///
 /// # Errors
 ///
 /// Returns a [`ReadError`] for every case listed under *Reading a file* in `SPEC.md`.
+/// It also rejects four kinds of metadata that the spec allows, because this reader cannot
+/// represent them or could not write them back:
+///
+/// - JSON numbers outside the `f64` range, such as `1e400`: `Metadata(InvalidJson)`.
+/// - JSON nested more than 128 levels deep (the limit of `serde_json`):
+///   `Metadata(InvalidJson)`.
+/// - Strings with a lone UTF-16 surrogate escape, such as `"\ud800"`: `Metadata(InvalidJson)`.
+/// - Metadata whose canonical re-written form exceeds 1 MiB (`1e5` is written back as
+///   `100000.0`): `Table(MetadataTooLong)`.
 ///
 /// # Example
 ///
@@ -28,12 +37,12 @@ use crate::{FIXED_HEADER_LEN, MAGIC, VERSION};
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn read(bytes: &[u8]) -> Result<Table, ReadError> {
-    // 1. The fixed header must be there.
+    // The fixed header must be there.
     if bytes.len() < FIXED_HEADER_LEN {
         return Err(ReadError::TooShort { len: bytes.len() });
     }
 
-    // 2–4. Magic, version, flags.
+    // Magic, version, flags.
     let magic = [bytes[0], bytes[1], bytes[2], bytes[3]];
     if magic != MAGIC {
         return Err(ReadError::BadMagic { found: magic });
@@ -47,7 +56,7 @@ pub fn read(bytes: &[u8]) -> Result<Table, ReadError> {
         return Err(ReadError::UnsupportedFlags(flags));
     }
 
-    // 5–6. Sizes and meta_len within the limits.
+    // Sizes and meta_len within the limits.
     let frame_size = u32_at(bytes, 8);
     let y_size = u32_at(bytes, 12);
     let z_size = u32_at(bytes, 16);
@@ -57,7 +66,7 @@ pub fn read(bytes: &[u8]) -> Result<Table, ReadError> {
         return Err(ReadError::MetadataTooLong { len: meta_len });
     }
 
-    // 7. The input must be exactly as long as the header says. After this check every
+    // The input must be exactly as long as the header says. After this check every
     //    offset below lies inside `bytes`, and every allocation is bounded by its length.
     let expected = layout::file_len(meta_len, total);
     let actual = bytes.len() as u64;
@@ -68,11 +77,11 @@ pub fn read(bytes: &[u8]) -> Result<Table, ReadError> {
         return Err(ReadError::TrailingBytes { expected, actual });
     }
 
-    // 8. Metadata.
+    // Metadata.
     let meta_end = FIXED_HEADER_LEN + meta_len as usize;
     let metadata = Metadata::from_json(&bytes[FIXED_HEADER_LEN..meta_end])?;
 
-    // 9. Padding must be zero.
+    // Padding must be zero.
     let sample_offset = layout::sample_offset(meta_len) as usize;
     if let Some(position) = bytes[meta_end..sample_offset].iter().position(|&b| b != 0) {
         return Err(ReadError::NonZeroPadding {
@@ -80,7 +89,7 @@ pub fn read(bytes: &[u8]) -> Result<Table, ReadError> {
         });
     }
 
-    // 10. Samples; `Table::new` checks that they are finite.
+    // Samples; `Table::new` checks that they are finite.
     let samples: Vec<f32> = bytes[sample_offset..]
         .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
