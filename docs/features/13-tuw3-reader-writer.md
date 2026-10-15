@@ -1,7 +1,7 @@
 # TUW3 reader and writer (version 0)
 
 - **Issue:** #13
-- **Status:** In progress
+- **Status:** Done
 - **Crates:** tuw3
 - **Format change:** yes (`SPEC.md` gains the duplicate-key rule (D12) and bounded JSON (D13);
   version bump: no)
