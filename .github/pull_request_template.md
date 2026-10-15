@@ -16,6 +16,7 @@ Closes #
 - [ ] `cargo fmt --all`
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo test --workspace`
+- [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
 - [ ] `cargo deny check` (if dependencies changed)
 - [ ] SPDX header on new source files
 - [ ] Decisions recorded in `docs/DECISIONS.md` (if any)
