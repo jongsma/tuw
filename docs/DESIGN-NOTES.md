@@ -32,6 +32,49 @@ must contain the intermediate positions as frames (many small steps), or the fil
 different morph model (e.g. interpolating formant frequencies instead of magnitudes). This
 needs a decision before the TUWS filter is designed.
 
+#### Implementation approaches [proposal]
+
+Three viable approaches, in order of spectral accuracy:
+
+**1. FIR via IFFT (most accurate)**
+Take a wavetable frame as the desired magnitude response, apply IFFT to derive time-domain
+FIR coefficients, then convolve incoming audio with those coefficients. Morph by interpolating
+between two frames *before* the IFFT step, so the coefficients themselves are blended rather
+than the audio. Latency is proportional to FIR length; manage with overlap-add convolution.
+
+**2. Direct frequency-domain multiply (most efficient)**
+FFT a block of incoming audio, multiply each bin by the corresponding wavetable sample
+(the frame treated as a per-bin gain), then IFFT back. This is the overlap-add method and
+is the natural fit for `rustfft`. Morph by crossfading between two frames before the multiply.
+
+**3. Peak-tracking filter bank (most analog character)**
+Analyse the wavetable frame for spectral peaks and drive a bank of resonant filters (SVF or
+biquad) from those peaks. Less spectrally precise but gives the character of analog filter
+cores. Closest to how formant filters in classic vocoders work.
+
+Approach 2 is the likely starting point for TUWS: it reuses the `rustfft` dependency already
+planned for Phase 2, and the overlap-add block size can be matched to the plugin's audio block
+size to keep latency minimal.
+
+#### Filter in the 3D cube [concept]
+
+With a 3D wavetable serving both oscillator and filter roles, each layer gets its own 2D
+morph coordinate navigating the same cube independently:
+
+    Oscillator reads cube at (y_osc, z_osc)
+    Filter     reads cube at (y_filt, z_filt)
+
+Four independent morph coordinates navigating the same timbral space. The same
+community-made wavetable can be used as both the sound source and the filter shape,
+giving the instrument a strong sonic identity without extra file formats or design work.
+
+#### Oscillator-drives-filter modulation [proposal]
+
+Tying `y_osc` → `y_filt` (or any axis combination) means the filter timbre tracks the
+oscillator timbre as it morphs. The filter character and the source character evolve together
+rather than independently. Worth exposing as an explicit modulation routing option rather than
+hardwiring it.
+
 ## 2. Wavetable DSP pitfalls
 
 ### 2.1 Phase alignment and DC across frames [finding] / [proposal]
