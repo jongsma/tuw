@@ -38,7 +38,8 @@ We borrow spec-kit's ideas without its tooling or folder structure.
    ends with a green `cargo test`.
 6. **Tests come from the acceptance criteria.** Property tests where possible (see `AGENTS.md`).
 7. **The doc is living.** If behaviour changes during implementation, update the spec in the
-   same PR. When the PR merges, set the status to *Done*; the doc stays as a record.
+   same PR. Set the status to *Done* in the PR's last commit (nobody comes back after the merge);
+   the doc stays as a record.
 8. **Two kinds of spec, kept apart.** `docs/SPEC.md` specifies the TUW3 *file format* for any
    implementer. `docs/features/` describes behaviour of *our tools*. Never mix the two.
 

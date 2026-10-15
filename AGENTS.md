@@ -129,3 +129,29 @@ Full process: [`docs/WORKFLOW.md`](docs/WORKFLOW.md). The essentials:
 - Don't add telemetry, network access or update checks.
 - Don't commit large binary wavetable sets. Reference datasets (AKWF etc.) by source and license.
 - Don't change the license, the SPDX headers or `deny.toml` without explicit maintainer approval.
+
+## Gotchas
+
+Lessons learned: mistakes that actually happened here, so nobody makes them twice. Add an entry
+only for a real mistake that is specific to this project, and only with the maintainer's
+approval. Remove entries whose cause is gone.
+
+- **Build the docs before a PR.** CI and the commands above don't, so broken intra-doc links
+  slip through: run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`. In `tuw3`,
+  link the function as ``[`write()`]``; ``[`write`]`` also matches std's `write!` macro.
+- **`tuw3::Metadata` has a private field.** Outside `tuw3`, struct-update syntax doesn't
+  compile: start from `Metadata::default()` and set fields. Inside `tuw3` it's the other way
+  round: clippy (`field_reassign_with_default`) rejects that pattern, so use
+  `Metadata { name: …, ..Metadata::default() }`.
+- **Cargo feature unification can change `tuw3`'s metadata parsing.** If any crate in the
+  workspace enables `serde_json`'s `arbitrary_precision` or `preserve_order`, `tuw3` parses
+  and writes metadata differently without any error. The guarding tests only run with
+  `cargo test --workspace`, not `-p tuw3`. After adding a dependency anywhere, check
+  `cargo tree -e features -i serde_json` (see `crates/tuw3/Cargo.toml`).
+- **A parser can be stricter than the spec.** When a reader rejects input that `SPEC.md`
+  allows, either bound the spec (as D12 and D13 did) or report the file as *unsupported*
+  (`SPEC.md`, *Size limits*); never call it invalid, and don't document the reader as accepting
+  everything the spec allows. Check RFC claims before writing them down: a lone surrogate
+  escape *is* valid JSON (RFC 8259 §8.2).
+- **DSP prose in `DESIGN-NOTES.md` is untested.** Have a fresh reviewer check DSP claims
+  before merging; PR #16 needed seven fixes in PR #17.

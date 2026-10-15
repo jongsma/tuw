@@ -34,7 +34,8 @@ Each criterion must be checkable by a test or a clearly described manual check.
 
 ### Open questions
 
-Answer or defer (with an issue) before writing the plan.
+Answer or defer (with an issue) before writing the plan. Once settled, don't write "none":
+list each question with its decision, so readers see what was decided.
 
 -
 
