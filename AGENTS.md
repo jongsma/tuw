@@ -29,7 +29,11 @@ All of these must pass before a change is considered done:
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
+
+CI runs the same commands, plus `cargo deny check` and a build with the minimum Rust version
+(`rust-version` in `Cargo.toml`); `main` only accepts changes whose checks pass.
 
 Other commands:
 
@@ -136,9 +140,8 @@ Lessons learned: mistakes that actually happened here, so nobody makes them twic
 only for a real mistake that is specific to this project, and only with the maintainer's
 approval. Remove entries whose cause is gone.
 
-- **Build the docs before a PR.** CI and the commands above don't, so broken intra-doc links
-  slip through: run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`. In `tuw3`,
-  link the function as ``[`write()`]``; ``[`write`]`` also matches std's `write!` macro.
+- **Doc links to `write` in `tuw3` are ambiguous.** Link the function as ``[`write()`]``;
+  ``[`write`]`` also matches std's `write!` macro, and the doc build fails.
 - **`tuw3::Metadata` has a private field.** Outside `tuw3`, struct-update syntax doesn't
   compile: start from `Metadata::default()` and set fields. Inside `tuw3` it's the other way
   round: clippy (`field_reassign_with_default`) rejects that pattern, so use

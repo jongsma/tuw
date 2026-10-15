@@ -78,7 +78,8 @@ the crate as scope: `feat(tuw3): read fixed header`, `fix(tuw-core): clamp morph
 `docs: add workflow`. PRs are squash-merged, so the PR title becomes the commit on `main`.
 
 **PRs:** link the issue (`Closes #12`), fill in the template, keep one concern per PR.
-CI must be green before merging.
+CI must be green before merging; a ruleset on `main` enforces this (checks `check`, `msrv`
+and `deny`).
 
 **Labels:**
 
@@ -104,6 +105,7 @@ gh pr merge --squash --delete-branch
 - [ ] `cargo fmt --all`
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo test --workspace`
+- [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
 - [ ] `cargo deny check` if dependencies changed
 - [ ] New source files start with the SPDX header
 - [ ] Feature doc updated (L track), `SPEC.md` updated (format track)
