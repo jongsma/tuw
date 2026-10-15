@@ -34,29 +34,31 @@ needs a decision before the TUWS filter is designed.
 
 #### Implementation approaches [proposal]
 
-Three viable approaches, in order of spectral accuracy:
+Two approaches for filtering audio with a frame:
 
-**1. FIR via IFFT (most accurate)**
-Take a wavetable frame as the desired magnitude response, apply IFFT to derive time-domain
-FIR coefficients, then convolve incoming audio with those coefficients. Morph by interpolating
-between two frames *before* the IFFT step, so the coefficients themselves are blended rather
-than the audio. Latency is proportional to FIR length; manage with overlap-add convolution.
+**A. FIR filter designed from the frame, applied by fast convolution (spectrally exact)**
+Treat the frame as the desired magnitude response, turn it into FIR coefficients with an
+inverse FFT (see *Designing the filter* below), and convolve the audio with them. For all but
+very short filters the convolution runs in the frequency domain: FFT a zero-padded block of
+audio, multiply bin by bin with the filter's spectrum, inverse FFT, and overlap-add the tails
+(see *Circular convolution* below). This is the natural fit for `rustfft`.
 
-**2. Direct frequency-domain multiply (most efficient)**
-FFT a block of incoming audio, multiply each bin by the corresponding wavetable sample
-(the frame treated as a per-bin gain), then IFFT back. This is the overlap-add method and
-is the natural fit for `rustfft`. Morph by crossfading between two frames before the multiply.
+To morph, interpolate between two frames' gain curves and design one filter from the result.
+For a linear-phase design this sounds the same as running both filters and crossfading their
+outputs, because the design is linear in the gain curve, but it costs one convolution instead
+of two. For a minimum-phase design the two differ: the minimum-phase version of a blended
+curve is not the blend of two minimum-phase filters.
 
-**3. Peak-tracking filter bank (most analog character)**
+**B. Peak-tracking filter bank (most analog character)**
 Analyse the wavetable frame for spectral peaks and drive a bank of resonant filters (SVF or
 biquad) from those peaks. Less spectrally precise but gives the character of analog filter
 cores. Closest to how formant filters in classic vocoders work.
 
-Approach 2 is the likely starting point for TUWS: it reuses the `rustfft` dependency already
-planned for Phase 2, and its latency is set by one fixed internal block size (see the caveats
-below).
+Approach A is the likely starting point for TUWS: it follows the frame exactly and reuses the
+`rustfft` dependency already planned for Phase 2. Its latency is the internal block size plus
+the filter's own delay (see the caveats below).
 
-**Caveats for approaches 1 and 2 [finding]:**
+**Caveats for approach A [finding]:**
 
 - *Circular convolution.* An FFT treats its block as one period of a repeating signal, so
   multiplying spectra bin by bin convolves *circularly*: a block of L samples filtered by an
@@ -64,11 +66,10 @@ below).
   last M − 1 wrap around onto the start of the block (audible as echoes, clicks or smearing at
   block edges). Overlap-add only works with zero padding: FFT size N ≥ L + M − 1, output the
   first L samples, and add the M − 1 tail samples to the start of the next block's output.
-- *Approaches 1 and 2 belong together.* A frame used as magnitudes with zero phase gives an
-  impulse response centred on time 0, half of it at negative time. It must first be made a
-  real, causal filter: shifted by half its length (linear phase, latency of half the filter)
-  or converted to minimum phase (low latency, some phase distortion), then windowed to M taps.
-  That design step is approach 1; approach 2 is the fast way to apply the result.
+- *Designing the filter.* A frame used as magnitudes with zero phase gives an impulse response
+  centred on time 0, half of it at negative time. It must first be made a real, causal filter:
+  shifted by half its length (linear phase, a delay of half the filter) or converted to
+  minimum phase (close to no delay, some phase distortion), then windowed to M taps.
 - *Mapping a frame onto the bins.* A frame has `frame_size` samples; an audio FFT of size N has
   N/2 + 1 bins. A rule is needed: raw frame samples or the magnitudes of the frame's own
   harmonics as the curve, a linear or logarithmic frequency axis, and fixing the curve in Hz so
@@ -79,21 +80,29 @@ below).
 - *Block size and latency.* The host chooses the size of each `process()` buffer and can change
   it on every call (small blocks live, large ones offline, short ones at loop ends; NIH-plug
   can split blocks for sample-accurate automation). The FFT block size therefore cannot follow
-  the host: collect input in a FIFO, process fixed blocks of L samples, and output L samples
-  late. Report that latency to the host (`context.set_latency_samples()` in NIH-plug); linear
-  phase adds half the filter length. At 48 kHz, 256 samples is 5.3 ms and 1024 is 21 ms. The
-  host compensates the latency of an effect on a recorded track, but not of a synth played live
-  over MIDI, where it is felt as a delay between key and sound. Long filters at small L need
-  partitioned convolution.
+  the host: collect input in a FIFO, process fixed blocks of L samples, and output them L
+  samples late. The total latency is those L samples plus the filter's own delay (half the
+  filter length for linear phase, close to zero for minimum phase); report it to the host
+  (`context.set_latency_samples()` in NIH-plug). At 48 kHz, 256 samples is 5.3 ms and 1024 is
+  21 ms. Hosts compensate reported latency during playback, instrument tracks included, but
+  not for live input: a player hitting keys over MIDI hears it as a delay between key and
+  sound. Partitioned convolution shortens the block part, so long filters can run with a
+  small L.
 
 #### Filtering in the harmonic domain [proposal]
 
-For TUWS's own oscillator there is a fourth option. Its input is a wavetable frame at a known
+For TUWS's own oscillator there is a third option. Its input is a wavetable frame at a known
 pitch, so its harmonics are known exactly: multiply each harmonic's amplitude by the filter
 curve evaluated at that harmonic's frequency in Hz, and play the resulting frame. No FFT runs on
 the live audio, so there is no circular convolution and **no latency**, and it fits naturally
-with the bandlimiting the oscillator needs anyway. Limits: it only filters TUWS's own
-oscillator, not external audio, and a fast-moving filter means rebuilding the frame often.
+with the bandlimiting the oscillator needs anyway.
+
+Limits: it only filters TUWS's own oscillator, not external audio. Because the curve is fixed in
+Hz and every note has its own pitch (and mip level), the filtered frame is rebuilt per voice,
+one inverse FFT per voice whenever pitch, morph position or filter changes; under the real-time
+rules in `AGENTS.md` that needs preallocated FFT buffers or rebuilding off the audio thread. It
+also keeps the crossfade caveat above: interpolated magnitudes fade formants instead of moving
+them.
 
 #### Filter in the 3D cube [concept]
 
@@ -103,7 +112,8 @@ morph coordinate navigating the same cube independently:
     Oscillator reads cube at (y_osc, z_osc)
     Filter     reads cube at (y_filt, z_filt)
 
-Four independent morph coordinates navigating the same timbral space. The same
+Two independent (y, z) positions, four morph values in total, navigating the same timbral
+space. The same
 community-made wavetable can be used as both the sound source and the filter shape,
 giving the instrument a strong sonic identity without extra file formats or design work.
 
@@ -122,16 +132,24 @@ If neighbouring frames have harmonics with different phases, morphing between th
 partials partially cancel (audible dips/nulls mid-morph). Frames should also be DC-free.
 
 *Proposal:* offer **phase canonicalization** in TUWE (at import, or as an editor action):
-per frame, forward FFT → set every harmonic to a fixed phase, keep magnitudes → inverse FFT.
-Absolute per-harmonic phase is essentially inaudible for a steady tone, so this changes how a
-frame *looks* but not how it *sounds*, and it removes morph nulls completely. A single
+per frame, forward FFT → set every harmonic to the phase given by one fixed schedule shared by
+all frames, keep magnitudes → inverse FFT. For a steady tone through linear processing, absolute
+per-harmonic phase is essentially inaudible, so this changes how a frame *looks* but hardly how
+it *sounds*, and it removes morph nulls completely.
+
+The schedule matters. Equal phases for all harmonics line their peaks up into a spiky,
+pulse-like frame with a high crest factor: after peak normalisation it plays quieter, and it
+distorts differently in saturation or in integrated tables (§2.6). Schroeder or fixed
+quasi-random phases keep the crest factor low. Phase also becomes audible through nonlinear
+processing and at very low fundamentals. A single
 waveform rotation (Bristow-Johnson's method) can only align the overall shape, not every
 harmonic, which fails for drawn or algorithmic frames.
 
 Good first test: morph between two canonicalized frames and assert there are no spectral nulls.
 
 *Open:* whether "phase-canonical" and/or "DC-free" should become a normalisation convention
-in `SPEC.md`, or stay an editor feature. Not decided.
+in `SPEC.md`, or stay an editor feature. Not decided; tracked as a `SPEC.md` open question
+([#7](https://github.com/jongsma/tuw/issues/7)).
 
 ### 2.2 Anti-aliasing: mip-maps in 3D [finding] / [proposal]
 
@@ -141,15 +159,18 @@ In the 3D cube, the pitch-based level choice must be identical for all four corn
 bilinear interpolation.
 
 *Proposal:* TUW3 stores only full-band frames; mip levels are computed by the player
-(at load or lazily). Not decided; affects memory and load time.
+(at load or lazily). Not decided ([#8](https://github.com/jongsma/tuw/issues/8), a `SPEC.md`
+open question); affects memory and load time.
 
 ### 2.3 Frame size [finding]
 
-2048 samples per frame is the de facto standard: 1024 harmonics, full bandwidth down to about
-20 Hz. AKWF frames are 600 samples (300 harmonics), losing top end below roughly 73 Hz. Fine
-for analysis, worth knowing when playing them directly or resampling to 2048.
+2048 samples per frame is the de facto standard: 1024 harmonics. At 44.1 kHz (Nyquist
+22 050 Hz) that fills the whole band for notes down to about 21.5 Hz (22 050 / 1024). AKWF
+frames are 600 samples (300 harmonics), so the top of the band stays empty for notes below
+about 73.5 Hz (22 050 / 300). Fine for analysis, worth knowing when playing them directly or
+resampling to 2048.
 
-### 2.4 Morphing and phase [finding]
+### 2.4 Morphing and phase [finding] / [proposal]
 
 All frames share one phase accumulator, so morphing does not cause phase discontinuities.
 The real issue is zipper noise from stepping the morph position: smooth the Y/Z parameters
@@ -162,7 +183,9 @@ Use one phase convention throughout: normalised phase (Δφ = f/fs, wrap at 1) o
 ### 2.5 Memory [finding]
 
 100 tables × 256 frames × 2048 samples × 4 bytes ≈ 210 MB *before* mip levels. Large
-libraries need lazy loading; the format should allow reading the header without the samples.
+libraries need lazy loading. Settled for TUW3: the fixed header and the 16-byte aligned sample
+block let a reader read the header without the samples and load one Z-slice at a time (D11 in
+[`DECISIONS.md`](DECISIONS.md), *Layout* in [`SPEC.md`](SPEC.md#layout)).
 
 ### 2.6 Integrated (DPW) tables [finding]
 
@@ -171,7 +194,7 @@ If differentiated/integrated tables are ever used: the differentiator must be sc
 
 ## 3. Phase 2: algorithmic generation
 
-### 3.1 Pipeline [concept]
+### 3.1 Pipeline [proposal]
 
 1. Read single-cycle WAVs with `hound`
 2. FFT analysis with `rustfft`
@@ -200,8 +223,8 @@ ordered, physically meaningful spectral change instead of plain interpolation.
 ## 4. References
 
 - R. Bristow-Johnson, *Wavetable Synthesis 101, A Fundamental Perspective*, AES 1996
-  (copy on musicdsp.org). Core reading for sections 1–3 and 5: oscillator model, multi-table
-  morphing (Prophet VS), wavetable ↔ additive equivalence via the DFT, phase alignment,
-  pitch-synchronous extraction. Dated on anti-aliasing (no mip levels).
+  (copy on musicdsp.org). Its sections 1–3 and 5 are the core reading: oscillator model,
+  multi-table morphing (Prophet VS), wavetable ↔ additive equivalence via the DFT, phase
+  alignment, pitch-synchronous extraction. Dated on anti-aliasing (no mip levels).
 - EarLevel Engineering, wavetable oscillator article series: practical anti-aliasing.
 - Franck & Välimäki (2012) and Välimäki & Huovilainen (2006): bandlimited oscillator research.
