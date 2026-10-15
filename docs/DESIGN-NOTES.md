@@ -53,8 +53,47 @@ biquad) from those peaks. Less spectrally precise but gives the character of ana
 cores. Closest to how formant filters in classic vocoders work.
 
 Approach 2 is the likely starting point for TUWS: it reuses the `rustfft` dependency already
-planned for Phase 2, and the overlap-add block size can be matched to the plugin's audio block
-size to keep latency minimal.
+planned for Phase 2, and its latency is set by one fixed internal block size (see the caveats
+below).
+
+**Caveats for approaches 1 and 2 [finding]:**
+
+- *Circular convolution.* An FFT treats its block as one period of a repeating signal, so
+  multiplying spectra bin by bin convolves *circularly*: a block of L samples filtered by an
+  impulse response of M samples gives L + M − 1 output samples, and with an FFT of size L the
+  last M − 1 wrap around onto the start of the block (audible as echoes, clicks or smearing at
+  block edges). Overlap-add only works with zero padding: FFT size N ≥ L + M − 1, output the
+  first L samples, and add the M − 1 tail samples to the start of the next block's output.
+- *Approaches 1 and 2 belong together.* A frame used as magnitudes with zero phase gives an
+  impulse response centred on time 0, half of it at negative time. It must first be made a
+  real, causal filter: shifted by half its length (linear phase, latency of half the filter)
+  or converted to minimum phase (low latency, some phase distortion), then windowed to M taps.
+  That design step is approach 1; approach 2 is the fast way to apply the result.
+- *Mapping a frame onto the bins.* A frame has `frame_size` samples; an audio FFT of size N has
+  N/2 + 1 bins. A rule is needed: raw frame samples or the magnitudes of the frame's own
+  harmonics as the curve, a linear or logarithmic frequency axis, and fixing the curve in Hz so
+  the filter sounds the same at every sample rate and FFT size. Frame samples run from −1 to 1;
+  a negative gain flips a bin's phase, so take the absolute value or map the range to 0–1.
+- *Morphing over time.* If the morph position changes between blocks, the filter jumps at the
+  block edge; crossfade between the old and new filter's output, or smooth the position.
+- *Block size and latency.* The host chooses the size of each `process()` buffer and can change
+  it on every call (small blocks live, large ones offline, short ones at loop ends; NIH-plug
+  can split blocks for sample-accurate automation). The FFT block size therefore cannot follow
+  the host: collect input in a FIFO, process fixed blocks of L samples, and output L samples
+  late. Report that latency to the host (`context.set_latency_samples()` in NIH-plug); linear
+  phase adds half the filter length. At 48 kHz, 256 samples is 5.3 ms and 1024 is 21 ms. The
+  host compensates the latency of an effect on a recorded track, but not of a synth played live
+  over MIDI, where it is felt as a delay between key and sound. Long filters at small L need
+  partitioned convolution.
+
+#### Filtering in the harmonic domain [proposal]
+
+For TUWS's own oscillator there is a fourth option. Its input is a wavetable frame at a known
+pitch, so its harmonics are known exactly: multiply each harmonic's amplitude by the filter
+curve evaluated at that harmonic's frequency in Hz, and play the resulting frame. No FFT runs on
+the live audio, so there is no circular convolution and **no latency**, and it fits naturally
+with the bandlimiting the oscillator needs anyway. Limits: it only filters TUWS's own
+oscillator, not external audio, and a fast-moving filter means rebuilding the frame often.
 
 #### Filter in the 3D cube [concept]
 
