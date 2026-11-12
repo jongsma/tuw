@@ -98,9 +98,10 @@ Writers should keep samples within [-1, 1]. Values outside that range are valid,
 must accept them.
 
 Nothing else about the samples is required: a frame may have a DC offset (a non-zero mean),
-any peak level, and any phases between its harmonics. Readers and libraries must return the
-samples exactly as stored and must not normalise, re-centre or otherwise change them while
-reading. See [Uses of a table](#uses-of-a-table) for why.
+any peak level, and any phases between its harmonics. Writers must store the samples they are
+given unchanged, and readers and libraries must return them exactly as stored: neither may
+normalise, re-centre or otherwise change them. Editing a table is the author's choice, not
+part of writing or reading it. See [Uses of a table](#uses-of-a-table) for why.
 
 ## Uses of a table
 
