@@ -176,9 +176,9 @@ octave (~10–11 per frame), with crossfading between adjacent levels to avoid t
 In the 3D cube, the pitch-based level choice must be identical for all four corners of the
 bilinear interpolation.
 
-*Proposal:* TUW3 stores only full-band frames; mip levels are computed by the player
-(at load or lazily). Not decided ([#8](https://github.com/jongsma/tuw/issues/8), a `SPEC.md`
-open question); affects memory and load time.
+*Outcome (#8, D15):* TUW3 stores only full-band frames; the oscillator computes mip levels
+from its own copy, at load or lazily. Hand-made mip levels may return in another form
+([#21](https://github.com/jongsma/tuw/issues/21)).
 
 ### 2.3 Frame size [finding]
 
