@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Round trips (AC4), deterministic output (AC5) and unknown metadata keys (AC10).
+//! Also #7: samples come back exactly as stored, whatever their offset or range.
 
 mod common;
 
@@ -45,6 +46,31 @@ fn special_finite_values_round_trip() {
         f32::MIN,
         f32::EPSILON,
         1.0,
+    ];
+    round_trip(&Table::new(8, 1, 1, samples, Metadata::default()).unwrap());
+}
+
+/// #7 AC2: a DC offset is data, not damage (unipolar LFOs, envelopes, filter curves).
+#[test]
+fn offset_frames_round_trip() {
+    // Frame 0 entirely in 0.5 ..= 1.0, frame 1 entirely negative.
+    let mut samples: Vec<f32> = (0..8).map(|x| 0.5 + x as f32 / 14.0).collect();
+    samples.extend((0..8).map(|x| -0.25 - x as f32 / 10.0));
+    round_trip(&Table::new(8, 2, 1, samples, Metadata::default()).unwrap());
+}
+
+/// #7 AC3: samples outside [-1, 1] are valid; writers only *should* avoid them.
+#[test]
+fn out_of_range_samples_round_trip() {
+    let samples = vec![
+        4.0,
+        -4.0,
+        1000.0,
+        -1000.0,
+        1.000_000_1,
+        -1.000_000_1,
+        2.0,
+        -2.0,
     ];
     round_trip(&Table::new(8, 1, 1, samples, Metadata::default()).unwrap());
 }
