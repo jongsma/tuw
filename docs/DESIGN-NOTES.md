@@ -14,7 +14,9 @@ Each note is tagged:
 
 ### 1.1 The 3D wavetable cube [concept]
 
-A table is a grid of single-cycle frames along two independent morph axes, Y and Z.
+A table is a grid of frames along two independent morph axes, Y and Z. A frame is usually one
+cycle of a waveform, but it can also be a curve over time or frequency (*Uses of a table* in
+[`SPEC.md`](SPEC.md#uses-of-a-table)).
 The playhead is a 2D coordinate (y, z); playback interpolates bilinearly between the four
 neighbouring frames. This is what TUW3 stores and what TUWS plays.
 
@@ -23,7 +25,9 @@ neighbouring frames. This is what TUW3 stores and what TUWS plays.
 Besides driving an oscillator, a table can shape a **filter**: each frame is treated as a
 spectral envelope (magnitude per harmonic/bin), applied via FIR or FFT-based filtering.
 Scanning the morph position changes the filter shape, e.g. for vowel/formant morphing.
-The same community-made table can serve as oscillator source *and* filter.
+The same community-made table can serve as oscillator source *and* filter, and also as an LFO
+or envelope shape. Which use a table gets is recorded in the TUWS preset, not in the table
+(D14 in [`DECISIONS.md`](DECISIONS.md)).
 
 **Caveat [finding]:** linear interpolation between frames *crossfades* spectra. Morphing
 from an "a" frame to an "o" frame fades one set of formant peaks out and the other in; at the
@@ -124,16 +128,30 @@ oscillator timbre as it morphs. The filter character and the source character ev
 rather than independently. Worth exposing as an explicit modulation routing option rather than
 hardwiring it.
 
+### 1.3 Per-use conditioning controls [parked]
+
+TUWS may offer manual, per-use controls for imported tables: a **DC offset** control that
+shifts a frame's curve up or down (removing an offset is one setting of it; adding one turns a
+bipolar LFO unipolar) and a **phase** control (for example, aligning harmonic phases as in
+§2.1). They work on TUWS's own copy, are saved in the preset together with the table's use, and
+never change the file (D14). The oscillator's automatic DC removal stays on regardless, since a
+static offset is almost never wanted in an audio output: it wastes headroom and causes clicks
+when notes start and stop. (An offset feeding a saturator or an FM input does change the sound;
+whether TUWS supports that on purpose is a Phase 4 question.) Exact controls and defaults are
+for Phase 4.
+
 ## 2. Wavetable DSP pitfalls
 
 ### 2.1 Phase alignment and DC across frames [finding] / [proposal]
 
 If neighbouring frames have harmonics with different phases, morphing between them makes
-partials partially cancel (audible dips/nulls mid-morph). Frames should also be DC-free.
+partials partially cancel (audible dips/nulls mid-morph). Frames used as sound should also be
+DC-free; the oscillator removes the offset from its playback copy (D14), and an integrated
+table must be DC-free *before* integrating (§2.6), so a DC blocker on the output is not enough.
 
-*Proposal:* offer **phase canonicalization** in TUWE (at import, or as an editor action):
-per frame, forward FFT → set every harmonic to the phase given by one fixed schedule shared by
-all frames, keep magnitudes → inverse FFT. For a steady tone through linear processing, absolute
+*Proposal:* offer **phase canonicalization** in TUWE as an editor action, applied only when the
+author asks: per frame, forward FFT → set every harmonic to the phase given by one fixed schedule
+shared by all frames, keep magnitudes → inverse FFT. For a steady tone through linear processing, absolute
 per-harmonic phase is essentially inaudible, so this changes how a frame *looks* but hardly how
 it *sounds*, and it removes morph nulls completely.
 
@@ -147,9 +165,9 @@ harmonic, which fails for drawn or algorithmic frames.
 
 Good first test: morph between two canonicalized frames and assert there are no spectral nulls.
 
-*Open:* whether "phase-canonical" and/or "DC-free" should become a normalisation convention
-in `SPEC.md`, or stay an editor feature. Not decided; tracked as a `SPEC.md` open question
-([#7](https://github.com/jongsma/tuw/issues/7)).
+*Outcome (#7, D14):* TUW3 makes no promise about phase, DC or level, because a table can also be
+an LFO, envelope or filter curve, where alignment or offset removal would destroy the shape.
+Phase canonicalization stays an editor action, offered for tables used as sound.
 
 ### 2.2 Anti-aliasing: mip-maps in 3D [finding] / [proposal]
 

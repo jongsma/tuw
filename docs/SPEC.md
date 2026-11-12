@@ -4,9 +4,10 @@
 
 ## Overview
 
-A TUW3 file holds a three-dimensional wavetable: a grid of single-cycle frames along two
-morph axes (Y and Z). A player addresses the table with a 2D coordinate (y, z) and
-interpolates bilinearly between the four surrounding frames.
+A TUW3 file holds a three-dimensional wavetable: a grid of frames along two morph axes
+(Y and Z). A frame is a list of `frame_size` samples, usually one cycle of a waveform; see
+[Uses of a table](#uses-of-a-table) for other uses. A player addresses the table with a 2D
+coordinate (y, z) and interpolates bilinearly between the four surrounding frames.
 
 TUW3 is created and edited with **TUWE** and played back by **TUWS**, the reference
 implementations. The format is meant to be implementable by any tool.
@@ -15,7 +16,8 @@ The words **must**, **must not**, **should** and **may** are used as in RFC 2119
 
 ## Axes
 
-- **X** is the sample position within a frame: one single cycle, `frame_size` samples long.
+- **X** is the sample position within a frame, `frame_size` samples long. What X stands for
+  (one cycle, time, frequency) depends on how the table is used, not on the file.
 - **Y** is the first morph axis: `y_size` frames.
 - **Z** is the second morph axis: `z_size` frames.
 
@@ -92,8 +94,32 @@ Samples are IEEE 754 binary32 (`f32`), little-endian. Every sample must be finit
 ±Infinity are not allowed. Writers must not write them; readers must reject a file that
 contains them.
 
-The level or range of the samples is not specified yet (see
-[#7](https://github.com/jongsma/tuw/issues/7)).
+Writers should keep samples within [-1, 1]. Values outside that range are valid, and readers
+must accept them.
+
+Nothing else about the samples is required: a frame may have a DC offset (a non-zero mean),
+any peak level, and any phases between its harmonics. Writers must store the samples they are
+given unchanged, and readers and libraries must return them exactly as stored: neither may
+normalise, re-centre or otherwise change them. Editing a table is the author's choice, not
+part of writing or reading it. See [Uses of a table](#uses-of-a-table) for why.
+
+## Uses of a table
+
+A table does not say what it is for. The same file can serve as, for example:
+
+- an **oscillator**: each frame is one cycle of a waveform;
+- an **LFO**: each frame is one cycle of a modulation shape, possibly unipolar (0 to 1);
+- an **envelope**: each frame is a curve over time with a start and an end;
+- a **filter**: each frame describes a gain curve over frequency.
+
+Each use prepares the table in its own way. An oscillator, for example, typically removes DC
+from its playback copy, while an LFO, envelope or filter needs the values as stored. How a use
+reads a frame (whether it wraps around at the end, how it maps a frame onto frequencies, what
+negative values or values above 1 mean) is up to that use and is not part of this format.
+
+Editors may offer to remove DC offsets, align harmonic phases between frames or normalise
+levels, but should apply these only when the author asks, since each of them can break a use
+other than the one the author has in mind.
 
 ## Metadata
 
@@ -161,5 +187,4 @@ A reader should check the header and the file length before allocating memory fo
 Each is discussed in a GitHub issue; outcomes are recorded here and in `DECISIONS.md`.
 
 - A separate, permissive license for this specification so any tool can implement it ([#6](https://github.com/jongsma/tuw/issues/6))
-- Frame normalisation conventions: phase-canonical, DC-free, sample range ([#7](https://github.com/jongsma/tuw/issues/7))
 - Whether files may carry precomputed mip levels ([#8](https://github.com/jongsma/tuw/issues/8))

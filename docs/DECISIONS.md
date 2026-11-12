@@ -193,3 +193,33 @@ with duplicate keys (D12), the spec bounds the JSON so that "valid" means the sa
 tool. Numbers and nesting are bounded well past anything a wavetable's metadata needs.
 Re-encoding growth cannot be written as a tool-independent rule, because it depends on how a
 tool spells numbers, so it uses the existing *Size limits* rule: report as unsupported.
+
+## D14. TUW3 samples are use-neutral (Nov 2026)
+
+**Decision:** a TUW3 file makes no promise about the level, DC offset or harmonic phases of its
+frames; it stores the samples exactly as the author made them ([#7](https://github.com/jongsma/tuw/issues/7)).
+
+1. Readers, loaders and libraries must not change samples: no DC removal, no phase rewriting,
+   no rescaling.
+2. What a table is used for (oscillator, LFO, envelope, filter) is not stored in TUW3. It
+   belongs in the TUWS preset format (Phase 4).
+3. For sound, DC is always removed, by the TUWS oscillator on its own playback copy. LFO,
+   envelope and filter uses read the values as stored, unless the user adjusts them in TUWS
+   (DESIGN-NOTES §1.3).
+4. DC removal, phase canonicalisation and normalisation are TUWE editor actions, applied when
+   the author asks. Warnings about a table appear in TUWE, never in the plugin.
+5. Writers *should* keep samples within [-1, 1]; nothing about level, DC or phase is required.
+
+No `version` bump: nothing that was valid becomes invalid.
+
+**Why:**
+
+- The project's defining idea is that one table can be used for anything: an oscillator, an
+  LFO, an envelope or a filter curve (DESIGN-NOTES §1.2).
+- Each candidate convention helps one use and breaks another. A DC offset is unwanted in an
+  oscillator but is the whole point of a unipolar LFO or an envelope, and a filter curve needs
+  its gains unchanged. Phase canonicalisation mostly keeps an oscillator's steady-state sound
+  (DESIGN-NOTES §2.1 lists the exceptions) but destroys any other shape.
+  Normalising each frame erases loudness or gain differences the author designed on purpose.
+- So the format guarantees the one thing every use needs: the samples arrive as authored. Each
+  use prepares the table for itself, and the preset says which use applies.
