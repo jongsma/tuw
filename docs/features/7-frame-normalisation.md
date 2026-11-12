@@ -1,7 +1,7 @@
 # Frame normalisation: what a TUW3 file promises about its samples
 
 - **Issue:** #7
-- **Status:** In progress (spec approved by the maintainer, 2026-11-12)
+- **Status:** Done (spec approved by the maintainer, 2026-11-12)
 - **Crates:** tuw3 (tests and crate docs only)
 - **Format change:** yes (`SPEC.md` gains *Uses of a table* and sample-range advice; X no longer
   means "one single cycle"; version bump: no)
@@ -134,20 +134,20 @@ with:
 
 ### Acceptance criteria
 
-- [ ] AC1: `SPEC.md`, `DECISIONS.md`, `DESIGN-NOTES.md` and the `tuw3` crate doc contain the
+- [x] AC1: `SPEC.md`, `DECISIONS.md`, `DESIGN-NOTES.md` and the `tuw3` crate doc contain the
   changes above; `SPEC.md` no longer lists #7 as open, and nothing in `docs/` or `crates/`
   still calls a frame "single-cycle" as a requirement. Merged feature docs (such as
   `13-tuw3-reader-writer.md`) are historical records and stay unchanged; describing *source
   material* as single-cycle (DESIGN-NOTES §3, AKWF) is correct and stays.
-- [ ] AC2: a test reads back, bit for bit, a table whose frames have a large DC offset
+- [x] AC2: a test reads back, bit for bit, a table whose frames have a large DC offset
   (all samples in 0.5 ..= 1.0), and one that is entirely negative.
-- [ ] AC3: a test reads back, bit for bit, a table with samples outside [-1, 1]
+- [x] AC3: a test reads back, bit for bit, a table with samples outside [-1, 1]
   (e.g. ±4.0 and ±1000.0); `Table::new` and `read` both accept it.
-- [ ] AC4: a property test: for any table of finite samples, `read(write(table))` returns the
+- [x] AC4: a property test: for any table of finite samples, `read(write(table))` returns the
   same samples bit for bit (compare `f32::to_bits`, so −0.0 and subnormals count too).
   Already covered by `valid_tables_round_trip` in `tests/properties.rs` (random finite bit
   patterns, compared with `f32::to_bits`); AC4 is met by pointing to it.
-- [ ] AC5: all commands in `AGENTS.md` pass.
+- [x] AC5: all commands in `AGENTS.md` pass.
 
 ### Out of scope
 
@@ -222,7 +222,7 @@ bug: fix it in `crates/tuw3/src/` in this PR before going on. No other productio
   y_size, z_size, samples: Vec<f32>, metadata) -> Result<Table, TableError>`, `Metadata::default()`.
 - Produces: nothing used later.
 
-- [ ] **Step 1: Write the tests**
+- [x] **Step 1: Write the tests**
 
 ```rust
 /// #7 AC2: a DC offset is data, not damage (unipolar LFOs, envelopes, filter curves).
@@ -245,13 +245,13 @@ fn out_of_range_samples_round_trip() {
 AC4 needs no new test: `valid_tables_round_trip` in `tests/properties.rs` already round-trips
 random finite bit patterns and compares with `f32::to_bits`.
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `cargo test -p tuw3 --test round_trip`
 Expected: PASS, including `offset_frames_round_trip` and `out_of_range_samples_round_trip`.
 If either fails, fix the reader/`Table::new` so it accepts any finite sample, then re-run.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/tuw3/tests/round_trip.rs
@@ -269,10 +269,10 @@ git commit -m "test(tuw3): samples with a DC offset or outside [-1, 1] round-tri
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Apply the `SPEC.md` text** exactly as given under *Changes to `SPEC.md`*, and
+- [x] **Step 1: Apply the `SPEC.md` text** exactly as given under *Changes to `SPEC.md`*, and
   drop the #7 bullet from *Open questions*.
 
-- [ ] **Step 2: Write the rest**
+- [x] **Step 2: Write the rest**
   - `DECISIONS.md` **D14. TUW3 samples are use-neutral (Nov 2026)**, in the D12/D13 style:
     a **Decision:** paragraph listing decisions 1–5 (stating "No `version` bump"), and a
     **Why:** list taken from *Problem* (one table, many uses; each property helps one use and
@@ -283,7 +283,7 @@ git commit -m "test(tuw3): samples with a DC offset or outside [-1, 1] round-tri
     (Y and Z). The samples are returned exactly as stored: what a frame means (a cycle, a curve
     over time or over frequency) is up to the caller."
 
-- [ ] **Step 3: Check**
+- [x] **Step 3: Check**
 
 ```sh
 grep -rn -i "single.cycle" docs/SPEC.md docs/DECISIONS.md docs/DESIGN-NOTES.md crates/
@@ -296,11 +296,11 @@ Expected: the first grep only hits DESIGN-NOTES §3 ("single-cycle WAVs", source
 the second finds exactly one heading; the third finds the two links from *Overview* and
 *Samples*; the doc build passes.
 
-- [ ] **Step 3b: Fresh DSP review.** Per AGENTS.md *Gotchas* ("DSP prose in
+- [x] **Step 3b: Fresh DSP review.** Per AGENTS.md *Gotchas* ("DSP prose in
   `DESIGN-NOTES.md` is untested"), have a fresh reviewer check the new and changed DSP claims
   (DC and phase effects per use, §1.3, *Uses of a table*) before committing.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/SPEC.md docs/DECISIONS.md docs/DESIGN-NOTES.md crates/tuw3/src/lib.rs docs/features/7-frame-normalisation.md
@@ -309,7 +309,7 @@ git commit -m "docs(tuw3): TUW3 samples are use-neutral (#7)"
 
 ### Task 3: Full check (AC5)
 
-- [ ] **Step 1: Run all `AGENTS.md` commands**
+- [x] **Step 1: Run all `AGENTS.md` commands**
 
 ```sh
 cargo fmt --all
@@ -320,10 +320,18 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
 Expected: all pass, no `cargo fmt` diff.
 
-- [ ] **Step 2: Mark the feature doc *Status: Done*,** tick the acceptance criteria, and commit
+- [x] **Step 2: Mark the feature doc *Status: Done*,** tick the acceptance criteria, and commit
   that as `docs(tuw3): mark #7 done`. Opening the PR (which closes #7)
   waits for the maintainer.
 
 ---
 
 ## Notes
+- AC2 and AC3 passed on the first run, since the reader already behaved as specified. To show
+  they would catch a regression, two temporary writer mutations were tried and reverted
+  (clamping to [-1, 1]: `out_of_range_samples_round_trip` fails; `abs()`: both fail).
+- The fresh DSP review led to wording fixes. In `SPEC.md`, "An oscillator ... should remove each
+  frame's DC offset" became "typically removes DC" (an RFC 2119 *should* would have made it a
+  player requirement), and the per-use list gained "what negative values or values above 1
+  mean". In D14 and DESIGN-NOTES, the overstated claims ("never useful", "keeps an
+  oscillator's sound") were narrowed. The decisions themselves are unchanged.
