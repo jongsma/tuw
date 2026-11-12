@@ -11,7 +11,9 @@
 //! Getting the bytes from a disk, a DAW's saved plugin state or anywhere else is up to the
 //! caller (see the examples on [`read`] and [`write()`]).
 //!
-//! A TUW3 file holds a grid of single-cycle frames along two morph axes (Y and Z).
+//! A TUW3 file holds a grid of frames along two morph axes (Y and Z). The samples are returned
+//! exactly as stored: what a frame means (a cycle, a curve over time or over frequency) is up
+//! to the caller.
 //! The format is defined in [`docs/SPEC.md`](https://github.com/jongsma/tuw/blob/main/docs/SPEC.md);
 //! this crate follows the spec, never the other way round.
 //!
