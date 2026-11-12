@@ -1,7 +1,7 @@
 # Mip levels: full-band frames only
 
 - **Issue:** #8
-- **Status:** In progress (spec approved by the maintainer, 2026-11-12)
+- **Status:** Done (spec approved by the maintainer, 2026-11-12)
 - **Crates:** none (docs only)
 - **Format change:** yes (`SPEC.md` states that files hold full-band frames only; version bump:
   no)
@@ -25,8 +25,8 @@ Agreed with the maintainer in the brainstorming session (2026-11-12):
 1. **A TUW3 file stores only full-band frames.** Version 0 has no mip levels.
 2. **A use that needs band-limited copies builds them itself.** For example, an oscillator
    builds them at load time, or lazily for large tables. This follows D14 (#7): only the
-   oscillator needs mip levels, so only the oscillator makes them, from its own copy. An LFO,
-   envelope or filter has no use for them.
+   oscillator needs mip levels, so only the oscillator makes them, from its own copy. An
+   envelope, a filter or an LFO at sub-audio rates has no use for them.
 3. **No version bump:** nothing changes for existing files.
 4. **Hand-made mip levels are deferred, not rejected.** An author shaping the top octaves by
    hand is a real but niche benefit. It may come back later, either as optional data in the
@@ -52,10 +52,12 @@ Agreed with the maintainer in the brainstorming session (2026-11-12):
 
 **Why** (for D15):
 
-- Building the copies takes one forward FFT per frame plus one inverse FFT per level (about
-  10–11). For a typical table (256 frames of 2048 samples) that is roughly 3,000 FFTs: tens of
-  milliseconds on one thread. Only tables near the size limit take seconds, and those can be
-  built lazily. Storing the copies would save little load time.
+- Building the copies takes one forward FFT per frame plus one inverse FFT per frame and level
+  (about 10–11 levels for 2048-sample frames). For a typical table (256 frames of 2048 samples)
+  that is roughly 3,000 FFTs: tens of milliseconds on one thread. Tables near the size limit
+  take seconds and their copies need gigabytes of memory; building lazily spreads the time but
+  doesn't save that memory, and storing the copies in the file wouldn't either. Storing them
+  would save little load time.
 - Stored copies would roughly double the file (halving the size per level: 1 + ½ + ¼ + … ≈ 2),
   or grow it about elevenfold (full size per level), which would also hit the 2²⁸-sample limit
   that much sooner.
@@ -76,8 +78,8 @@ table in its own way.":
 
 > A file stores each frame once, at full bandwidth. Played as an oscillator, a frame of
 > `frame_size` samples can hold harmonics up to `frame_size / 2` (rounded down). Band-limited
-> versions of the frames (mip levels), which an oscillator needs to play high notes without
-> aliasing, are not stored. A use that needs them builds them from the frames.
+> versions of the frames (mip levels), which an oscillator typically uses to play high notes
+> without aliasing, are not stored. A use that needs them builds them from the frames.
 
 **Open questions**: remove the #8 bullet. Add:
 
@@ -96,9 +98,9 @@ table in its own way.":
 
 ### Acceptance criteria
 
-- [ ] AC1: `SPEC.md`, `DECISIONS.md` and `DESIGN-NOTES.md` contain the changes above, and
+- [x] AC1: `SPEC.md`, `DECISIONS.md` and `DESIGN-NOTES.md` contain the changes above, and
   `SPEC.md` no longer lists #8 as open.
-- [ ] AC2: all commands in `AGENTS.md` pass. No code changes; `tuw3` already reads and writes
+- [x] AC2: all commands in `AGENTS.md` pass. No code changes; `tuw3` already reads and writes
   only full frames.
 
 ### Out of scope
@@ -134,11 +136,17 @@ reads and writes only full-band frames, and nothing in this decision adds behavi
 
 ## Tasks
 
-- [ ] T1 (AC1): `SPEC.md`
-- [ ] T2 (AC1): `DECISIONS.md` D15, DESIGN-NOTES §2.2
-- [ ] T3 (AC1): fresh DSP review, fixes
-- [ ] T4 (AC2): full check, commit, PR
+- [x] T1 (AC1): `SPEC.md`
+- [x] T2 (AC1): `DECISIONS.md` D15, DESIGN-NOTES §2.2
+- [x] T3 (AC1): fresh DSP review, fixes
+- [x] T4 (AC2): full check, commit, PR
 
 ---
 
 ## Notes
+
+- The fresh DSP review found no errors, only loose wording, which was fixed: the FFT count is
+  per frame *and* level; 10–11 levels holds for 2048-sample frames; LFOs at audio rate alias
+  too, so only sub-audio LFOs skip mip levels. In `SPEC.md`, "which an oscillator needs" became
+  "typically uses", since oversampling is another way. Skipped: noting that for even frame
+  sizes the top harmonic can only be a cosine at a fixed phase (too fine for the spec).

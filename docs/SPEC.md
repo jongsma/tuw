@@ -119,8 +119,8 @@ negative values or values above 1 mean) is up to that use and is not part of thi
 
 A file stores each frame once, at full bandwidth. Played as an oscillator, a frame of
 `frame_size` samples can hold harmonics up to `frame_size / 2` (rounded down). Band-limited
-versions of the frames (mip levels), which an oscillator needs to play high notes without
-aliasing, are not stored. A use that needs them builds them from the frames.
+versions of the frames (mip levels), which an oscillator typically uses to play high notes
+without aliasing, are not stored. A use that needs them builds them from the frames.
 
 Editors may offer to remove DC offsets, align harmonic phases between frames or normalise
 levels, but should apply these only when the author asks, since each of them can break a use
