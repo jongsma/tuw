@@ -223,3 +223,35 @@ No `version` bump: nothing that was valid becomes invalid.
   Normalising each frame erases loudness or gain differences the author designed on purpose.
 - So the format guarantees the one thing every use needs: the samples arrive as authored. Each
   use prepares the table for itself, and the preset says which use applies.
+
+## D15. TUW3 files hold full-band frames only (Nov 2026)
+
+**Decision:** a TUW3 file stores each frame once, at full bandwidth; version 0 has no mip
+levels (band-limited copies of the frames) ([#8](https://github.com/jongsma/tuw/issues/8)).
+
+1. A use that needs band-limited copies builds them itself. The TUWS oscillator builds them from
+   its own copy, at load time or lazily for large tables. Envelope and filter uses, and LFOs at
+   sub-audio rates, have no need for them (see D14 for the uses).
+2. Hand-made mip levels are deferred, not rejected. They may come back as optional data in the
+   file or in another form, such as a TUWS preset setting. How optional binary data can be added
+   without breaking readers is an open question ([#21](https://github.com/jongsma/tuw/issues/21)),
+   to be settled before the first public release.
+3. When TUWE imports a source that holds mip levels it can recognise, it keeps the full-band
+   frames, drops the copies and tells the user. Copies it can't recognise arrive as ordinary
+   frames.
+
+No `version` bump: nothing changes for existing files.
+
+**Why:**
+
+- Building the copies takes one forward FFT per frame plus one inverse FFT per frame and level
+  (about 10–11 levels for 2048-sample frames). For a typical table (256 frames of 2048 samples) that is roughly 3,000 FFTs: tens of
+  milliseconds on one thread. Storing them would save little load time.
+- Stored copies would roughly double a file (halving the size per level) or grow it about
+  elevenfold (full size per level), and could go stale when a tool edits frames without knowing
+  about them.
+- The spec would have to pin down the number of levels, the harmonics each keeps, the storage
+  and the handling of frame sizes that aren't a power of two, and every writer would have to
+  match it exactly.
+- Mip levels only serve one use, the oscillator. A file that carries them leans towards that use,
+  against D14.

@@ -117,6 +117,11 @@ from its playback copy, while an LFO, envelope or filter needs the values as sto
 reads a frame (whether it wraps around at the end, how it maps a frame onto frequencies, what
 negative values or values above 1 mean) is up to that use and is not part of this format.
 
+A file stores each frame once, at full bandwidth. Played as an oscillator, a frame of
+`frame_size` samples can hold harmonics up to `frame_size / 2` (rounded down). Band-limited
+versions of the frames (mip levels), which an oscillator needs to play high notes without
+aliasing, are not stored. A use that needs them builds them from the frames.
+
 Editors may offer to remove DC offsets, align harmonic phases between frames or normalise
 levels, but should apply these only when the author asks, since each of them can break a use
 other than the one the author has in mind.
@@ -187,4 +192,5 @@ A reader should check the header and the file length before allocating memory fo
 Each is discussed in a GitHub issue; outcomes are recorded here and in `DECISIONS.md`.
 
 - A separate, permissive license for this specification so any tool can implement it ([#6](https://github.com/jongsma/tuw/issues/6))
-- Whether files may carry precomputed mip levels ([#8](https://github.com/jongsma/tuw/issues/8))
+- How optional binary data (for example hand-made mip levels) can be added to a file without
+  breaking existing readers. To be settled before the first public release ([#21](https://github.com/jongsma/tuw/issues/21))
