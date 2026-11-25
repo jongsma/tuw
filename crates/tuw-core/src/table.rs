@@ -10,7 +10,7 @@ use tuw3::limits::{
 };
 use tuw3::{Metadata, SizeField, Table, TableError};
 
-use crate::error::EditError;
+use crate::error::{Axis, EditError};
 
 /// One frame: `frame_size` finite samples that never change once made.
 ///
@@ -185,6 +185,131 @@ impl Wavetable {
             result.frames[z as usize * self.y_size as usize + y as usize] = frame;
         }
         Ok(result)
+    }
+
+    /// Size of `axis`, and the other axis.
+    fn axis_size(&self, axis: Axis) -> u32 {
+        match axis {
+            Axis::Y => self.y_size,
+            Axis::Z => self.z_size,
+        }
+    }
+
+    /// Builds a table of the new axis size whose frame at (`y`, `z`) is `pick(y, z)`:
+    /// the frame at that old position, or `None` for a new silent frame.
+    fn regrid(
+        &self,
+        axis: Axis,
+        new_size: u32,
+        pick: impl Fn(u32, u32) -> Option<(u32, u32)>,
+    ) -> Wavetable {
+        let (y_size, z_size) = match axis {
+            Axis::Y => (new_size, self.z_size),
+            Axis::Z => (self.y_size, new_size),
+        };
+        let silence = Frame(vec![0.0f32; self.frame_size as usize].into());
+        let mut frames = Vec::with_capacity(y_size as usize * z_size as usize);
+        for z in 0..z_size {
+            for y in 0..y_size {
+                frames.push(match pick(y, z) {
+                    Some((oy, oz)) => {
+                        self.frames[oz as usize * self.y_size as usize + oy as usize].clone()
+                    }
+                    None => silence.clone(),
+                });
+            }
+        }
+        Wavetable {
+            frame_size: self.frame_size,
+            y_size,
+            z_size,
+            metadata: Arc::clone(&self.metadata),
+            frames,
+        }
+    }
+
+    /// A new table with `count` silent rows ([`Axis::Z`]) or columns ([`Axis::Y`]) inserted, so
+    /// that the first new one has index `at`. Existing frames move but stay shared. `at == size`
+    /// appends.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::ZeroCount`]; [`EditError::IndexOutOfRange`] when `at` is above the axis size;
+    /// [`EditError::Limits`] when the new size or the total breaks a TUW3 limit. Nothing changes
+    /// on error.
+    pub fn insert(&self, axis: Axis, at: u32, count: u32) -> Result<Wavetable, EditError> {
+        if count == 0 {
+            return Err(EditError::ZeroCount);
+        }
+        let size = self.axis_size(axis);
+        if at > size {
+            return Err(EditError::IndexOutOfRange {
+                axis,
+                index: at,
+                size,
+            });
+        }
+        // u64 so that `size + count` cannot overflow.
+        let new_size = u64::from(size) + u64::from(count);
+        if new_size > u64::from(MAX_AXIS_SIZE) {
+            return Err(EditError::Limits(TableError::SizeOutOfRange {
+                field: match axis {
+                    Axis::Y => SizeField::YSize,
+                    Axis::Z => SizeField::ZSize,
+                },
+                value: u32::try_from(new_size).unwrap_or(u32::MAX),
+                min: MIN_AXIS_SIZE,
+                max: MAX_AXIS_SIZE,
+            }));
+        }
+        let new_size = new_size as u32; // at most MAX_AXIS_SIZE
+        let (y_size, z_size) = match axis {
+            Axis::Y => (new_size, self.z_size),
+            Axis::Z => (self.y_size, new_size),
+        };
+        check_sizes(self.frame_size, y_size, z_size).map_err(EditError::Limits)?;
+        Ok(self.regrid(axis, new_size, |y, z| {
+            let pos = if axis == Axis::Y { y } else { z };
+            let old = if pos < at {
+                pos
+            } else if pos < at + count {
+                return None;
+            } else {
+                pos - count
+            };
+            Some(if axis == Axis::Y { (old, z) } else { (y, old) })
+        }))
+    }
+
+    /// A new table with `count` rows ([`Axis::Z`]) or columns ([`Axis::Y`]) removed, starting at
+    /// index `at`. Remaining frames move but stay shared.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::ZeroCount`]; [`EditError::IndexOutOfRange`] when `at + count` is above the
+    /// axis size; [`EditError::WouldRemoveAll`] when no row or column would remain. Nothing
+    /// changes on error.
+    pub fn remove(&self, axis: Axis, at: u32, count: u32) -> Result<Wavetable, EditError> {
+        if count == 0 {
+            return Err(EditError::ZeroCount);
+        }
+        let size = self.axis_size(axis);
+        // u64 so that `at + count` cannot overflow.
+        if u64::from(at) + u64::from(count) > u64::from(size) {
+            return Err(EditError::IndexOutOfRange {
+                axis,
+                index: at,
+                size,
+            });
+        }
+        if count == size {
+            return Err(EditError::WouldRemoveAll { axis });
+        }
+        Ok(self.regrid(axis, size - count, |y, z| {
+            let pos = if axis == Axis::Y { y } else { z };
+            let old = if pos < at { pos } else { pos + count };
+            Some(if axis == Axis::Y { (old, z) } else { (y, old) })
+        }))
     }
 
     /// A new table with other metadata; every frame is shared.
