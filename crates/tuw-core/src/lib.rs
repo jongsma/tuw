@@ -9,7 +9,24 @@
 //! The crate is meant to be read and learned from, so every public item is documented.
 //! Code reachable from an audio callback must follow the real-time rules in `AGENTS.md`.
 
+//! # Example
+//!
+//! ```
+//! use tuw_core::Wavetable;
+//!
+//! let table = tuw3::Table::new(8, 1, 1, vec![0.0; 8], tuw3::Metadata::default())?;
+//! let wavetable = Wavetable::from(table.clone());
+//! assert_eq!(wavetable.frame_size(), 8);
+//! assert_eq!(wavetable.to_tuw3().samples(), table.samples());
+//! # Ok::<(), tuw3::TableError>(())
+//! ```
+
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod error;
+mod table;
+
+pub use error::{Axis, EditError};
+pub use table::{Frame, Wavetable};
 pub use tuw3;
