@@ -112,7 +112,27 @@ gh pr merge --squash --delete-branch
 - [ ] Settled decisions recorded in `docs/DECISIONS.md`
 - [ ] PR description says honestly what was and wasn't verified (e.g. "not tested in a DAW")
 
-## 6. Decisions and open questions
+## 6. The Claude Code loop (optional)
+
+Maintainers using Claude Code can let it build specced work unattended with
+`/loop /next-item` (or `/loop` alone, which runs `.claude/loop.md`). The skills live in
+`.claude/skills/`:
+
+| Skill | What it does |
+|---|---|
+| `spec-item` | With the maintainer: issue, track, feature doc *Spec*, then the `loop:ready` label |
+| `next-item` | One iteration: the next `loop:ready` issue, planned, built test-first, verified, left as a local branch with a drafted PR description |
+| `tuw-verify` | The definition of done (§5) as one step |
+| `babysit` | `/loop 30m /babysit`: the gate and CI on `main` and the loop's branches; fixes only trivial things on unpushed loop branches |
+| `gotcha-sweep` | `/loop 2h /gotcha-sweep`: proposes new or stale `AGENTS.md` gotchas for the maintainer to approve |
+
+The loop follows this file up to the push and no further: it never pushes, opens PRs,
+writes to GitHub or commits on `main`, and it never edits the `AGENTS.md` gotchas. It only
+picks up an issue labelled `loop:ready` whose spec is complete (acceptance criteria, no open
+questions, current phase). Its state and batch report are local, in `.claude/state/`
+(git-ignored); the maintainer reads the report and decides which branches become PRs.
+
+## 7. Decisions and open questions
 
 - An open question is an issue labelled `type:question`. Don't settle it silently in code.
 - When it is decided, record it in [`DECISIONS.md`](DECISIONS.md) (and in `SPEC.md` if it is
