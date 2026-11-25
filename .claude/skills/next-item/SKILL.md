@@ -58,7 +58,9 @@ Add the ledger line `#<n> <branch> in-progress`.
 ## 3. Plan (no human approval needed)
 - Worktree: `git worktree add ../tuw-wt/<n>-<slug> <branch>` (L / Format: the existing branch);
   M: `git worktree add ../tuw-wt/<n>-<slug> -b <type>/<n>-<slug> origin/main`.
-- `superpowers:writing-plans`, written into the feature doc's *Plan* and *Tasks* sections (never
+- Feature doc already *Planned* (the maintainer approved a plan during `spec-item`): use that
+  plan as it is and go straight to the plan review below. Otherwise:
+  `superpowers:writing-plans`, written into the feature doc's *Plan* and *Tasks* sections (never
   `docs/plans/` or `docs/superpowers/`). M has no feature doc: keep the plan in the subagent
   ledger only. Set the feature doc's status to *Planned*.
 - Plan review: dispatch one fresh reviewer (most capable model) with the spec, the plan and

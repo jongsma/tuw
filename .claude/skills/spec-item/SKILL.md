@@ -24,6 +24,9 @@ is done together, never by a loop. It follows `docs/WORKFLOW.md`; the only addit
    - **Format:** the exact `SPEC.md` text and the `version` bump decision go into the feature doc
      (as in `docs/features/7-frame-normalisation.md`).
    - Status *Clarifying* until the maintainer approves the doc.
+   - Optionally, when the maintainer wants to see the plan before the loop builds it:
+     `superpowers:writing-plans` into the same doc's *Plan* and *Tasks*, status *Planned*. The
+     loop then uses that plan instead of writing its own.
 4. **Branch:** L / Format: `git switch -c <type>/<n>-<slug> origin/main`, commit the feature doc
    as the branch's first commit (`docs(<crate>): spec <topic> (#<n>)`), switch back. Never push.
 5. **Ready:** the track in the issue body, then, with the maintainer's OK, add the `loop:ready`
