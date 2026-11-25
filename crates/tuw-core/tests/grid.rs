@@ -188,12 +188,16 @@ fn grid_limits_are_refused() {
     assert_same(&wide.to_tuw3(), &before);
 
     let big = Wavetable::silent(65_536, 4_096, 1).unwrap();
-    let before = big.to_tuw3();
     assert!(matches!(
         big.insert(Axis::Z, 0, 1).unwrap_err(),
         EditError::Limits(TableError::TooManySamples { .. })
     ));
-    assert_same(&big.to_tuw3(), &before);
+    // Edits take `&self` and `Wavetable` has no interior mutability, so the original cannot
+    // change; a deep snapshot of this 1 GiB table would only cost memory.
+    assert_eq!(
+        (big.frame_size(), big.y_size(), big.z_size()),
+        (65_536, 4_096, 1)
+    );
 }
 
 #[test]

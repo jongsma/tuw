@@ -141,7 +141,7 @@ proptest! {
             after = t.insert(axis, at, count).unwrap();
             expected = model_insert(s, e, at, count);
         } else if size > 1 {
-            count = 1 + count_seed % (size - 1);
+            count = 1 + (count_seed - 1) % (size - 1);
             at = at_seed % (size - count + 1);
             after = t.remove(axis, at, count).unwrap();
             expected = model_remove(s, e, at, count, size - count);

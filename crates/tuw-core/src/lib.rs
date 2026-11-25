@@ -31,7 +31,9 @@
 //! let table = tuw3::Table::new(8, 1, 1, vec![0.0; 8], tuw3::Metadata::default())?;
 //! let wavetable = Wavetable::from(table.clone());
 //! assert_eq!(wavetable.frame_size(), 8);
-//! assert_eq!(wavetable.to_tuw3().samples(), table.samples());
+//! // Compare bit patterns: floats are never compared with `==`.
+//! let bits = |s: &[f32]| s.iter().map(|x| x.to_bits()).collect::<Vec<u32>>();
+//! assert_eq!(bits(wavetable.to_tuw3().samples()), bits(table.samples()));
 //! # Ok::<(), tuw3::TableError>(())
 //! ```
 

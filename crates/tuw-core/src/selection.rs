@@ -42,7 +42,8 @@ fn insert_range(s: u32, e: u32, at: u32, count: u32) -> (u64, u64) {
     }
 }
 
-/// Selection `[s, e]` on one axis after removing `count` indices from `at`. If no selected index remains, the result is `s` (clamped by the caller).
+/// Selection `[s, e]` on one axis after removing `count` indices from `at`. If no selected index
+/// remains, the result is `s` (clamped by the caller).
 fn remove_range(s: u32, e: u32, at: u32, count: u32) -> (u64, u64) {
     let (s, e, at, count) = (u64::from(s), u64::from(e), u64::from(at), u64::from(count));
     let removed_end = at + count; // first index after the removed block

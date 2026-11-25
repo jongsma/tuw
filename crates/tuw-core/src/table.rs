@@ -187,7 +187,7 @@ impl Wavetable {
         Ok(result)
     }
 
-    /// Size of `axis`, and the other axis.
+    /// The number of frames along `axis`.
     fn axis_size(&self, axis: Axis) -> u32 {
         match axis {
             Axis::Y => self.y_size,
@@ -207,7 +207,9 @@ impl Wavetable {
             Axis::Y => (new_size, self.z_size),
             Axis::Z => (self.y_size, new_size),
         };
-        let silence = Frame(vec![0.0f32; self.frame_size as usize].into());
+        // Created on first use, so every new frame of one edit shares one buffer and a remove
+        // allocates none.
+        let mut silence: Option<Frame> = None;
         let mut frames = Vec::with_capacity(y_size as usize * z_size as usize);
         for z in 0..z_size {
             for y in 0..y_size {
@@ -215,7 +217,9 @@ impl Wavetable {
                     Some((oy, oz)) => {
                         self.frames[oz as usize * self.y_size as usize + oy as usize].clone()
                     }
-                    None => silence.clone(),
+                    None => silence
+                        .get_or_insert_with(|| Frame(vec![0.0f32; self.frame_size as usize].into()))
+                        .clone(),
                 });
             }
         }
