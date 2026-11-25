@@ -6,7 +6,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use tuw3::limits::{
-    MAX_AXIS_SIZE, MAX_FRAME_SIZE, MAX_TOTAL_SAMPLES, MIN_AXIS_SIZE, MIN_FRAME_SIZE,
+    MAX_AXIS_SIZE, MAX_FRAME_SIZE, MAX_META_LEN, MAX_TOTAL_SAMPLES, MIN_AXIS_SIZE, MIN_FRAME_SIZE,
 };
 use tuw3::{Metadata, SizeField, Table, TableError};
 
@@ -140,6 +140,69 @@ impl Wavetable {
             .iter()
             .enumerate()
             .map(move |(i, f)| (i as u32 % y_size, i as u32 / y_size, f))
+    }
+
+    /// Checks one replacement frame and builds it: position, then length, then finiteness.
+    fn checked_frame(&self, y: u32, z: u32, samples: Vec<f32>) -> Result<Frame, EditError> {
+        if y >= self.y_size || z >= self.z_size {
+            return Err(EditError::OutsideGrid { y, z });
+        }
+        if samples.len() != self.frame_size as usize {
+            return Err(EditError::FrameLength {
+                expected: self.frame_size,
+                actual: samples.len(),
+            });
+        }
+        if let Some(x) = samples.iter().position(|s| !s.is_finite()) {
+            return Err(EditError::NonFiniteSample { y, z, x: x as u32 });
+        }
+        Ok(Frame(samples.into()))
+    }
+
+    /// A new table with the frame at (`y`, `z`) replaced; every other frame is shared.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::OutsideGrid`], [`EditError::FrameLength`] or [`EditError::NonFiniteSample`]
+    /// (the first bad sample), checked in that order. Nothing changes on error.
+    pub fn with_frame(&self, y: u32, z: u32, samples: Vec<f32>) -> Result<Wavetable, EditError> {
+        self.with_frames(vec![(y, z, samples)])
+    }
+
+    /// A new table with several frames replaced at once. All entries are checked before
+    /// anything is built; when a position appears twice, the later entry wins.
+    ///
+    /// # Errors
+    ///
+    /// As for [`with_frame`](Wavetable::with_frame), for the first bad entry.
+    pub fn with_frames(&self, frames: Vec<(u32, u32, Vec<f32>)>) -> Result<Wavetable, EditError> {
+        let checked = frames
+            .into_iter()
+            .map(|(y, z, samples)| Ok((y, z, self.checked_frame(y, z, samples)?)))
+            .collect::<Result<Vec<_>, EditError>>()?;
+        let mut result = self.clone();
+        for (y, z, frame) in checked {
+            result.frames[z as usize * self.y_size as usize + y as usize] = frame;
+        }
+        Ok(result)
+    }
+
+    /// A new table with other metadata; every frame is shared.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::Limits`] with [`TableError::MetadataTooLong`] when the encoded metadata
+    /// would exceed the TUW3 limit.
+    pub fn with_metadata(&self, metadata: Metadata) -> Result<Wavetable, EditError> {
+        let len = metadata.encoded_len();
+        if len as u64 > u64::from(MAX_META_LEN) {
+            return Err(EditError::Limits(TableError::MetadataTooLong {
+                len: len as u64,
+            }));
+        }
+        let mut result = self.clone();
+        result.metadata = Arc::new(metadata);
+        Ok(result)
     }
 
     /// Converts to a [`tuw3::Table`], copying the samples once. Never fails.
