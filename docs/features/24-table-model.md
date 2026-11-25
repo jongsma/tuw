@@ -1,7 +1,7 @@
 # Editable table model with rectangular selection
 
 - **Issue:** #24
-- **Status:** Planned
+- **Status:** Done
 - **Crates:** tuw-core (plus one small additive API in tuw3, see *Open questions*)
 - **Format change:** no
 
@@ -97,33 +97,33 @@ here means reworking every later slice.
 
 ### Acceptance criteria
 
-- [ ] **AC1 (round trip):** for random valid `tuw3::Table`s (property test), converting to the
+- [x] **AC1 (round trip):** for random valid `tuw3::Table`s (property test), converting to the
   editable table and back gives sizes, metadata and samples bit-identical to the input,
   including `-0.0` and subnormal samples, `y_size = 1`, `z_size = 1`, both 1, and frame sizes that
   are not a power of two.
-- [ ] **AC2 (new table):** a new table has the requested sizes, every sample is `0.0`, and it
+- [x] **AC2 (new table):** a new table has the requested sizes, every sample is `0.0`, and it
   converts to a `tuw3::Table` that `tuw3::write` / `tuw3::read` round-trips. Every size outside
   the TUW3 limits is refused with its own error.
-- [ ] **AC3 (immutability and sharing):** after replacing one frame, the old version is unchanged
+- [x] **AC3 (immutability and sharing):** after replacing one frame, the old version is unchanged
   (bit for bit), the new version differs only in that frame, and every other frame is the *same
   buffer* in both versions (pointer equality), not a copy.
-- [ ] **AC4 (always valid):** each operation that would break a TUW3 rule is refused with a typed
+- [x] **AC4 (always valid):** each operation that would break a TUW3 rule is refused with a typed
   error and the table is unchanged: a non-finite sample (NaN, ±∞), a wrong frame length,
   growing an axis past 4 096, growing past 2²⁸ samples, removing the last row or column,
   metadata over 1 MiB, a position outside the grid.
-- [ ] **AC5 (rows and columns):** inserting and removing rows and columns at the start, the
+- [x] **AC5 (rows and columns):** inserting and removing rows and columns at the start, the
   middle and the end (including the last frame on an axis) puts every existing frame at the
   expected (y, z) and shares its buffer; new frames are silent; property test: inserting then
   removing the same row or column gives back an equal table.
-- [ ] **AC6 (selection):** each way of setting a selection gives the expected rectangle; a
+- [x] **AC6 (selection):** each way of setting a selection gives the expected rectangle; a
   selection outside the grid is refused; after every insert and remove from AC5 the selection is
   adjusted exactly as described under *Behaviour* (insert before, inside, after; partial and
   full removal, at both ends) and lies inside the grid; fitting any selection to any valid grid
   gives a selection inside it (property tests over random grids, selections and edits).
-- [ ] **AC7 (threads):** versions and frames are `Send + Sync` (compile-time check).
-- [ ] **AC8 (crate rules):** `tuw-core` gains no GUI, plugin or file I/O dependency; every public
+- [x] **AC7 (threads):** versions and frames are `Send + Sync` (compile-time check).
+- [x] **AC8 (crate rules):** `tuw-core` gains no GUI, plugin or file I/O dependency; every public
   item is documented; all `AGENTS.md` commands pass.
-- [ ] **AC9 (many small frames):** a table with many tiny frames (for example 4 096 × 16 frames
+- [x] **AC9 (many small frames):** a table with many tiny frames (for example 4 096 × 16 frames
   of 8 samples) converts, edits one frame and converts back correctly. Correctness only, no
   timing.
 
@@ -261,16 +261,16 @@ afterwards checks `assert_same(&t.to_tuw3(), &before)`.
 **Interfaces:** produces `pub fn encoded_len(&self) -> usize` on `tuw3::Metadata`: the length in
 bytes of the metadata block `write()` produces (0 for empty metadata).
 
-- [ ] **Step 1: Write the failing test** `encoded_len_matches_meta_len`: for empty metadata, a
+- [x] **Step 1: Write the failing test** `encoded_len_matches_meta_len`: for empty metadata, a
   metadata with only `name = "Saw"`, and one with all six known fields set to non-ASCII text,
   build a 8 × 1 × 1 table, write it, and assert
   `u32::from_le_bytes(bytes[20..24]) as usize == metadata.encoded_len()`. Empty metadata gives 0.
-- [ ] **Step 2: Run it and see it fail:** `cargo test -p tuw3 --test round_trip encoded_len` —
+- [x] **Step 2: Run it and see it fail:** `cargo test -p tuw3 --test round_trip encoded_len` —
   fails to compile (no `encoded_len`).
-- [ ] **Step 3: Implement** `encoded_len` as the length of the existing `to_json()` output, with a
+- [x] **Step 3: Implement** `encoded_len` as the length of the existing `to_json()` output, with a
   doc comment that says why a caller needs it (checking `MAX_META_LEN` before building a table).
-- [ ] **Step 4: Run it and see it pass**, then `cargo test --workspace`.
-- [ ] **Step 5: Commit** `feat(tuw3): add Metadata::encoded_len (#24)`.
+- [x] **Step 4: Run it and see it pass**, then `cargo test --workspace`.
+- [x] **Step 5: Commit** `feat(tuw3): add Metadata::encoded_len (#24)`.
 
 ### Task 2: `Wavetable`, `Frame` and conversion (AC1, AC2, AC7, part of AC8)
 
@@ -310,14 +310,14 @@ impl From<tuw3::Table> for Wavetable;
 `Wavetable` derives `Clone` (copies the pointer list, shares frames); `Debug` is written by hand
 and shows only the sizes. No `PartialEq` (it would compare floats).
 
-- [ ] **Step 1: Test helpers** in `tests/common/mod.rs` (starting with `#![allow(dead_code)]`,
+- [x] **Step 1: Test helpers** in `tests/common/mod.rs` (starting with `#![allow(dead_code)]`,
   as in `tuw3`): `finite_f32()` and a `tuw3_table(max_axis: u32)` strategy as in
   `crates/tuw3/tests/properties.rs` but with frame sizes 8..=40 *and* 600 among them, axes
   `1..=max_axis` (Task 2 uses 4, Task 5 uses 6); `assert_same(a: &tuw3::Table, b: &tuw3::Table)` comparing sizes, metadata
   (`==`) and every sample by `to_bits`; `table_with_unknown_keys() -> tuw3::Table`, made by
   `tuw3::read` of hand-assembled bytes (`SPEC.md` *Layout*) with metadata
   `{"name":"x","zz":[1,{"a":null}]}`.
-- [ ] **Step 2: Write the failing tests** in `tests/table.rs`:
+- [x] **Step 2: Write the failing tests** in `tests/table.rs`:
   - `round_trip_is_bit_identical` (proptest, AC1): `assert_same(&Wavetable::from(t.clone()).to_tuw3(), &t)`.
   - `round_trip_keeps_negative_zero_subnormals_and_unknown_keys` (AC1): a 600 × 1 × 1 table with
     `-0.0`, `f32::MIN_POSITIVE / 2.0` and `-f32::MIN_POSITIVE / 2.0` among its samples, and
@@ -336,9 +336,9 @@ and shows only the sizes. No `PartialEq` (it would compare floats).
     matching samples.
   - `types_are_send_and_sync` (AC7): `fn check<T: Send + Sync>() {}` called for `Wavetable`,
     `Frame`, `EditError`.
-- [ ] **Step 3: Run them and see them fail:** `cargo test -p tuw-core --test table` — fails to
+- [x] **Step 3: Run them and see them fail:** `cargo test -p tuw-core --test table` — fails to
   compile.
-- [ ] **Step 4: Implement** `error.rs` and `table.rs`. `From<tuw3::Table>` uses `into_parts` and
+- [x] **Step 4: Implement** `error.rs` and `table.rs`. `From<tuw3::Table>` uses `into_parts` and
   `chunks_exact(frame_size)` (one copy); `to_tuw3` joins frames into one `Vec` with exact
   capacity and calls `Table::new(…).expect("a Wavetable always satisfies the TUW3 rules")`;
   a private `check_sizes(frame_size, y_size, z_size) -> Result<(), tuw3::TableError>` checks frame
@@ -346,10 +346,10 @@ and shows only the sizes. No `PartialEq` (it would compare floats).
   total in `u64` (`TooManySamples`), the same order as `tuw3`; `silent` and Task 4 use it. Silent
   frames of one table share one buffer. `lib.rs` re-exports `Axis`,
   `EditError`, `Frame`, `Wavetable` and gains a crate-doc example converting a `tuw3::Table`.
-- [ ] **Step 5: Run them and see them pass**, then all `AGENTS.md` commands.
-- [ ] **Step 5b:** `cargo tree -e features -i serde_json`: `arbitrary_precision` and
+- [x] **Step 5: Run them and see them pass**, then all `AGENTS.md` commands.
+- [x] **Step 5b:** `cargo tree -e features -i serde_json`: `arbitrary_precision` and
   `preserve_order` stay off after adding `proptest` (`AGENTS.md` gotcha).
-- [ ] **Step 6: Commit** `feat(tuw-core): add the Wavetable value and tuw3 conversion (#24)`.
+- [x] **Step 6: Commit** `feat(tuw-core): add the Wavetable value and tuw3 conversion (#24)`.
 
 ### Task 3: Replacing frames and metadata (AC3, AC4)
 
@@ -370,7 +370,7 @@ Checks, in order per frame: position (`OutsideGrid`), length (`FrameLength`), fi
 anything; with a duplicate position the later entry wins. `with_metadata` refuses
 `encoded_len() > MAX_META_LEN` as `Limits(TableError::MetadataTooLong { len })`.
 
-- [ ] **Step 1: Write the failing tests** in `tests/edits.rs`:
+- [x] **Step 1: Write the failing tests** in `tests/edits.rs`:
   - `replacing_one_frame_shares_the_others` (AC3): on a random 8 × 3 × 2 table `a`,
     `before = a.to_tuw3()`, `b = a.with_frame(1, 1, new)`: `assert_same(&a.to_tuw3(), &before)`; `b.frame(1, 1)`
     equals `new` by bits; for every other `(y, z)`, `Frame::ptr_eq(a.frame(y,z), b.frame(y,z))`;
@@ -386,10 +386,10 @@ anything; with a duplicate position the later entry wins. `with_metadata` refuse
   - `metadata_over_the_limit_is_refused` (AC4): `description` of `MAX_META_LEN` bytes →
     `Limits(TableError::MetadataTooLong { .. })`; a short name is accepted and survives
     `to_tuw3`; every frame is shared (`ptr_eq`) between the two versions.
-- [ ] **Step 2: Run and see them fail:** `cargo test -p tuw-core --test edits`.
-- [ ] **Step 3: Implement** the three methods.
-- [ ] **Step 4: Run and see them pass**, then all `AGENTS.md` commands.
-- [ ] **Step 5: Commit** `feat(tuw-core): replace frames and metadata (#24)`.
+- [x] **Step 2: Run and see them fail:** `cargo test -p tuw-core --test edits`.
+- [x] **Step 3: Implement** the three methods.
+- [x] **Step 4: Run and see them pass**, then all `AGENTS.md` commands.
+- [x] **Step 5: Commit** `feat(tuw-core): replace frames and metadata (#24)`.
 
 ### Task 4: Inserting and removing rows and columns (AC4, AC5, AC9)
 
@@ -415,7 +415,7 @@ Z frames at one Y (`Axis::Y`). Errors: `count == 0` → `ZeroCount`; insert `at 
 the new axis size is compared with `MAX_AXIS_SIZE` in `u64` *before* `check_sizes` is called, and
 the error reports `value: u32::try_from(new_size).unwrap_or(u32::MAX)`.
 
-- [ ] **Step 1: Write the failing tests** in `tests/grid.rs`, on a 8 × 4 × 3 table whose frame
+- [x] **Step 1: Write the failing tests** in `tests/grid.rs`, on a 8 × 4 × 3 table whose frame
   `(y, z)` is filled with `(z * 10 + y + 1) as f32` (so every frame is identifiable):
   - `inserting_columns_moves_frames` (AC5): `insert(Axis::Y, at, 2)` for `at` in 0, 2, 4 (= size,
     append): new frames silent, every old frame at its expected new `(y, z)` and `ptr_eq` to its
@@ -437,11 +437,11 @@ the error reports `value: u32::try_from(new_size).unwrap_or(u32::MAX)`.
   - `many_small_frames_work` (AC9): `silent(8, 4_096, 16)`, `with_frame(4_095, 15, …)`, then
     `to_tuw3()` and back: the changed frame and a sample of others are correct by bits. No
     timing assertion.
-- [ ] **Step 2: Run and see them fail:** `cargo test -p tuw-core --test grid`.
-- [ ] **Step 3: Implement** `insert` and `remove` by building the new pointer list in TUW3
+- [x] **Step 2: Run and see them fail:** `cargo test -p tuw-core --test grid`.
+- [x] **Step 3: Implement** `insert` and `remove` by building the new pointer list in TUW3
   order; new frames share one silent buffer.
-- [ ] **Step 4: Run and see them pass**, then all `AGENTS.md` commands.
-- [ ] **Step 5: Commit** `feat(tuw-core): insert and remove rows and columns (#24)`.
+- [x] **Step 4: Run and see them pass**, then all `AGENTS.md` commands.
+- [x] **Step 5: Commit** `feat(tuw-core): insert and remove rows and columns (#24)`.
 
 ### Task 5: `Selection` (AC6)
 
@@ -476,7 +476,7 @@ Rules per axis, with selection `[s, e]` (from the spec):
 - fit: `[min(s, size - 1), min(e, size - 1)]`.
 Constructors return `IndexOutOfRange` or `OutsideGrid` for positions outside the grid.
 
-- [ ] **Step 1: Write the failing tests** in `tests/selection.rs`, on a 8 × 6 × 5 table:
+- [x] **Step 1: Write the failing tests** in `tests/selection.rs`, on a 8 × 6 × 5 table:
   - `constructors_give_the_expected_rectangle`: `frame(2, 3)` → y 2..=2, z 3..=3; `row(4)` →
     y 0..=5, z 4..=4; `column(1)` → y 1..=1, z 0..=4; `rect((4, 1), (2, 3))` → y 2..=4, z 1..=3;
     `all` → y 0..=5, z 0..=4; `frame(6, 0)` → `OutsideGrid`; `row(5)` →
@@ -496,22 +496,30 @@ Constructors return `IndexOutOfRange` or `OutsideGrid` for positions outside the
     the rest shift down; nothing left: the fallback rule). `after_insert` / `after_remove` equal the
     model's `[min, max]` and lie inside the new table; `fit` of a random selection on a random
     table lies inside it.
-- [ ] **Step 2: Run and see them fail:** `cargo test -p tuw-core --test selection`.
-- [ ] **Step 3: Implement** `Selection`; re-export it from `lib.rs`.
-- [ ] **Step 4: Run and see them pass**, then all `AGENTS.md` commands.
-- [ ] **Step 5: Commit** `feat(tuw-core): add the rectangular selection (#24)`.
+- [x] **Step 2: Run and see them fail:** `cargo test -p tuw-core --test selection`.
+- [x] **Step 3: Implement** `Selection`; re-export it from `lib.rs`.
+- [x] **Step 4: Run and see them pass**, then all `AGENTS.md` commands.
+- [x] **Step 5: Commit** `feat(tuw-core): add the rectangular selection (#24)`.
 
 ### Task 6: Finish (AC8)
 
-- [ ] **Step 1:** check AC8: `cargo tree -p tuw-core -e normal` shows only `tuw3` and its
+- [x] **Step 1:** check AC8: `cargo tree -p tuw-core -e normal` shows only `tuw3` and its
   dependencies; `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` passes; the crate
   doc in `lib.rs` describes `Wavetable`, `Frame` and `Selection` in a few lines with the version
   idea (edits return new versions, untouched frames are shared).
-- [ ] **Step 2:** all `AGENTS.md` commands, and `cargo +1.85 check --workspace --all-targets` if
+- [x] **Step 2:** all `AGENTS.md` commands, and `cargo +1.85 check --workspace --all-targets` if
   that toolchain is installed (otherwise say CI checks it).
-- [ ] **Step 3:** tick AC1–AC9 above, set *Status: Done*, commit
+- [x] **Step 3:** tick AC1–AC9 above, set *Status: Done*, commit
   `docs(tuw-core): mark the table model done (#24)`.
 
 ---
 
 ## Notes
+
+- Built by the Claude Code loop (D16), November 2026. 90 tests in the workspace at the end.
+- Deviations from the plan, each recorded as a ruling in the commits: the branch was rebased onto
+  `main` before building; the plan review added overflow and selection-model tests; the one
+  refusal test on a 2²⁸-sample table checks sizes instead of a 1 GiB deep snapshot, because
+  versions cannot change (edits take `&self`).
+- Open for later: `with_frame` / `with_frames` take `Vec<f32>`; a slice would spare callers a copy.
+  Worth deciding before #31 adds callers.
