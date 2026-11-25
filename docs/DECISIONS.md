@@ -272,3 +272,19 @@ before the push keeps one concern per PR and leaves the maintainer to decide wha
 and CI. Gotchas need the maintainer's approval (`AGENTS.md`). The setup is adapted from the
 maintainer's loops in other repos, which commit straight to their main branch; that doesn't fit
 the PR-only workflow here.
+
+## D17. Phase 1 scope: a working TUWE prototype, foundations first (Nov 2026)
+
+**Decision:** Phase 1 ends with a rough, working TUWE prototype in which every basic operation
+works behind a throwaway UI: tables and files (TUW3, Serum WAV), making frames (shapes,
+harmonics, drawing, single-cycle import), grid editing and filling, frame operations including
+the D14 actions, warnings, undo, and a clean one-voice preview. No 3D view and no designed UI.
+The work is ordered foundations first (table model, edit/undo model, preview oscillator), then a
+walking skeleton, then one slice per operation. Scope, order and the reasoning are in
+[`features/23-phase-1-scope.md`](features/23-phase-1-scope.md); the issues are in the *Phase 1*
+milestone ([#23](https://github.com/jongsma/tuw/issues/23)).
+
+**Why:** the maintainer wants to use, see and hear the editor before designing its real
+interface, and Phase 2 and TUWS reuse the engine, so the engine must be right even where the UI is
+rough. The three foundations are the parts that would force rework of every slice if guessed
+wrong; building them first, headless and tested, avoids that.
