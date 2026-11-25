@@ -25,8 +25,10 @@
 #![warn(missing_docs)]
 
 mod error;
+mod selection;
 mod table;
 
 pub use error::{Axis, EditError};
+pub use selection::Selection;
 pub use table::{Frame, Wavetable};
 pub use tuw3;
