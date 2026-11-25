@@ -92,6 +92,16 @@ impl Metadata {
         })
     }
 
+    /// The length in bytes of the metadata block that [`write()`](crate::write) stores, which is
+    /// the `meta_len` header field; 0 for empty metadata.
+    ///
+    /// A caller can compare this with [`MAX_META_LEN`](crate::limits::MAX_META_LEN) to check the
+    /// metadata before building a [`Table`](crate::Table), instead of waiting for
+    /// [`Table::new`](crate::Table::new) to refuse it.
+    pub fn encoded_len(&self) -> usize {
+        self.to_json().len()
+    }
+
     /// Serialises to compact JSON: known fields in spec order (`None` left out), then unknown
     /// keys sorted, also inside nested objects. Empty metadata gives an empty block.
     pub(crate) fn to_json(&self) -> Vec<u8> {
