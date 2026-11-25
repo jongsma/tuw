@@ -1,0 +1,3 @@
+Run one iteration of the `next-item` skill (tuw loop: one `loop:ready` issue from GitHub, planned in its feature doc, built test-first with subagents in its own worktree, reviewed, verified with `tuw-verify`, committed on its own `<type>/<issue>-<slug>` branch, PR description drafted, gotcha proposals noted; never push, never open a PR, never touch `main`, never write to GitHub).
+
+Schedule the next wakeup short (1-3 minutes) as long as there is an item that can be picked up. Stop the loop according to the stop rules in the `next-item` skill: no ready item left, or two blocks in a row. In that case, end with the batch report: what was done, the rulings made, the branches ready to push, the proposed gotchas, and what the maintainer needs to decide.

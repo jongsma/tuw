@@ -256,6 +256,23 @@ No `version` bump: nothing changes for existing files.
 - Mip levels only serve one use, the oscillator. A file that carries them leans towards that use,
   against D14.
 
+## D16. An unattended Claude Code build loop, stopping before the push (Nov 2026)
+
+**Decision:** maintainers may let Claude Code build specced work unattended with the skills in
+`.claude/skills/` (`/loop /next-item`, described in [`WORKFLOW.md`](WORKFLOW.md) §6). The loop:
+
+- takes its work from GitHub issues labelled `loop:ready`, not from a task file in the repo;
+- builds each issue on its own local `<type>/<issue>-<slug>` branch and drafts the PR
+  description, but never pushes, opens PRs, writes to GitHub or commits on `main`;
+- only proposes `AGENTS.md` gotchas, never adds them;
+- keeps its state and batch report local and git-ignored, in `.claude/state/`.
+
+**Why:** issues are already the backlog (D10), so a second queue would drift from it. Stopping
+before the push keeps one concern per PR and leaves the maintainer to decide what reaches GitHub
+and CI. Gotchas need the maintainer's approval (`AGENTS.md`). The setup is adapted from the
+maintainer's loops in other repos, which commit straight to their main branch; that doesn't fit
+the PR-only workflow here.
+
 ## D17. Phase 1 scope: a working TUWE prototype, foundations first (Nov 2026)
 
 **Decision:** Phase 1 ends with a rough, working TUWE prototype in which every basic operation
