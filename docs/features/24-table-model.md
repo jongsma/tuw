@@ -221,6 +221,12 @@ dev-dependency of `tuw-core` (same version as `tuw3`, already in `Cargo.lock`).
 - `cargo test --workspace` (never only `-p`), plus the other `AGENTS.md` commands, before each
   commit.
 
+### Snapshots in tests
+
+A `Wavetable` clone shares every frame, so comparing against a clone proves nothing. Every test
+that says a table is "unchanged" takes a deep snapshot first (`let before = t.to_tuw3();`) and
+afterwards checks `assert_same(&t.to_tuw3(), &before)`.
+
 ### Review focus
 
 1. **Insert at `at == size`** (append) is valid and must not be refused as out of range; `at >
@@ -274,8 +280,8 @@ bytes of the metadata block `write()` produces (0 for empty metadata).
 **Interfaces (produces):**
 
 ```rust
-pub enum Axis { Y, Z }                       // Copy, Eq, Debug
-pub enum EditError {                         // Clone, Eq, Debug, Display, Error
+pub enum Axis { Y, Z }                       // Debug, Clone, Copy, PartialEq, Eq
+pub enum EditError {                         // Debug, Clone, PartialEq, Eq; Display, Error
     Limits(tuw3::TableError),                // sizes, total samples, metadata length
     FrameLength { expected: u32, actual: usize },
     NonFiniteSample { y: u32, z: u32, x: u32 },
@@ -304,9 +310,10 @@ impl From<tuw3::Table> for Wavetable;
 `Wavetable` derives `Clone` (copies the pointer list, shares frames); `Debug` is written by hand
 and shows only the sizes. No `PartialEq` (it would compare floats).
 
-- [ ] **Step 1: Test helpers** in `tests/common/mod.rs`: `finite_f32()` and a `tuw3_table()`
-  strategy as in `crates/tuw3/tests/properties.rs` but with frame sizes 8..=40 *and* 600 among
-  them, axes 1..=4; `assert_same(a: &tuw3::Table, b: &tuw3::Table)` comparing sizes, metadata
+- [ ] **Step 1: Test helpers** in `tests/common/mod.rs` (starting with `#![allow(dead_code)]`,
+  as in `tuw3`): `finite_f32()` and a `tuw3_table(max_axis: u32)` strategy as in
+  `crates/tuw3/tests/properties.rs` but with frame sizes 8..=40 *and* 600 among them, axes
+  `1..=max_axis` (Task 2 uses 4, Task 5 uses 6); `assert_same(a: &tuw3::Table, b: &tuw3::Table)` comparing sizes, metadata
   (`==`) and every sample by `to_bits`; `table_with_unknown_keys() -> tuw3::Table`, made by
   `tuw3::read` of hand-assembled bytes (`SPEC.md` *Layout*) with metadata
   `{"name":"x","zz":[1,{"a":null}]}`.
@@ -317,7 +324,7 @@ and shows only the sizes. No `PartialEq` (it would compare floats).
     `table_with_unknown_keys()`; both round-trip by `assert_same`, and the second's bytes via
     `tuw3::write` equal the original bytes.
   - `silent_table_is_all_zero_and_writable` (AC2): `silent(2048, 3, 2)` has those sizes, every
-    sample's bits equal `0.0f32.to_bits()`, and `tuw3::read(&tuw3::write(&t.to_tuw3()))` succeeds.
+    sample's bits equal `0.0f32.to_bits()`, and `assert_same(&tuw3::read(&tuw3::write(&t.to_tuw3()))?, &t.to_tuw3())`.
   - `silent_table_refuses_sizes_outside_the_limits` (AC2): each of frame size 7 and 65 537, y 0
     and 4 097, z 0 and 4 097 gives `EditError::Limits(TableError::SizeOutOfRange { field, value, .. })`
     with the matching field and value; `silent(65_536, 4_096, 2)` gives
@@ -325,7 +332,7 @@ and shows only the sizes. No `PartialEq` (it would compare floats).
   - `frame_outside_the_grid_is_an_error`: on a 8 × 2 × 3 table, `frame(2, 0)` and `frame(0, 3)`
     give `OutsideGrid`; `frame(1, 2)` is `Ok`.
   - `frames_iterate_in_tuw3_order`: on a table whose sample 0 of frame `(y, z)` is
-    `(z * 10 + y) as f32`, `frames()` yields `(y, z)` as (0,0),(1,0),(0,1),(1,1),(0,2),(1,2) with
+    `(z * 10 + y + 1) as f32`, `frames()` yields `(y, z)` as (0,0),(1,0),(0,1),(1,1),(0,2),(1,2) with
     matching samples.
   - `types_are_send_and_sync` (AC7): `fn check<T: Send + Sync>() {}` called for `Wavetable`,
     `Frame`, `EditError`.
@@ -340,6 +347,8 @@ and shows only the sizes. No `PartialEq` (it would compare floats).
   frames of one table share one buffer. `lib.rs` re-exports `Axis`,
   `EditError`, `Frame`, `Wavetable` and gains a crate-doc example converting a `tuw3::Table`.
 - [ ] **Step 5: Run them and see them pass**, then all `AGENTS.md` commands.
+- [ ] **Step 5b:** `cargo tree -e features -i serde_json`: `arbitrary_precision` and
+  `preserve_order` stay off after adding `proptest` (`AGENTS.md` gotcha).
 - [ ] **Step 6: Commit** `feat(tuw-core): add the Wavetable value and tuw3 conversion (#24)`.
 
 ### Task 3: Replacing frames and metadata (AC3, AC4)
@@ -363,7 +372,7 @@ anything; with a duplicate position the later entry wins. `with_metadata` refuse
 
 - [ ] **Step 1: Write the failing tests** in `tests/edits.rs`:
   - `replacing_one_frame_shares_the_others` (AC3): on a random 8 × 3 × 2 table `a`,
-    `b = a.with_frame(1, 1, new)`: `a` is bit-identical to a clone taken before; `b.frame(1, 1)`
+    `before = a.to_tuw3()`, `b = a.with_frame(1, 1, new)`: `assert_same(&a.to_tuw3(), &before)`; `b.frame(1, 1)`
     equals `new` by bits; for every other `(y, z)`, `Frame::ptr_eq(a.frame(y,z), b.frame(y,z))`;
     and `!Frame::ptr_eq` at `(1, 1)`.
   - `invalid_frames_are_refused_and_change_nothing` (AC4): NaN at `x = 3` →
@@ -402,10 +411,12 @@ Z frames at one Y (`Axis::Y`). Errors: `count == 0` → `ZeroCount`; insert `at 
 `at + count > size` → `IndexOutOfRange { axis, index: at, size }`; new size above
 `MAX_AXIS_SIZE` → `Limits(SizeOutOfRange { field: YSize | ZSize, .. })`; total above
 `MAX_TOTAL_SAMPLES` → `Limits(TooManySamples { .. })`; removing every row or column →
-`WouldRemoveAll { axis }`. All checks happen in `u64`, so `at + count` cannot overflow.
+`WouldRemoveAll { axis }`. All checks happen in `u64`, so `at + count` and `size + count` cannot overflow:
+the new axis size is compared with `MAX_AXIS_SIZE` in `u64` *before* `check_sizes` is called, and
+the error reports `value: u32::try_from(new_size).unwrap_or(u32::MAX)`.
 
 - [ ] **Step 1: Write the failing tests** in `tests/grid.rs`, on a 8 × 4 × 3 table whose frame
-  `(y, z)` is filled with `(z * 10 + y) as f32` (so every frame is identifiable):
+  `(y, z)` is filled with `(z * 10 + y + 1) as f32` (so every frame is identifiable):
   - `inserting_columns_moves_frames` (AC5): `insert(Axis::Y, at, 2)` for `at` in 0, 2, 4 (= size,
     append): new frames silent, every old frame at its expected new `(y, z)` and `ptr_eq` to its
     old buffer.
@@ -420,7 +431,9 @@ Z frames at one Y (`Axis::Y`). Errors: `count == 0` → `ZeroCount`; insert `at 
     `remove(Axis::Y, 0, 4)` on 4 columns → `WouldRemoveAll { axis: Axis::Y }`; growing a
     `silent(8, 4_096, 1)` table's Y by 1 → `Limits(SizeOutOfRange { field: YSize, value: 4_097, .. })`;
     growing `silent(65_536, 4_096, 1)` along Z by 1 → `Limits(TooManySamples { .. })`;
-    `insert(Axis::Z, u32::MAX, u32::MAX)` → `Err`, no panic. Each leaves the table unchanged.
+    `insert(Axis::Z, u32::MAX, u32::MAX)` → `IndexOutOfRange`; `insert(Axis::Z, 0, u32::MAX)` →
+    `Limits(SizeOutOfRange { field: ZSize, value: u32::MAX, .. })`; `remove(Axis::Z, 1, u32::MAX)`
+    → `IndexOutOfRange`; none panics. Each leaves the table unchanged (deep snapshot).
   - `many_small_frames_work` (AC9): `silent(8, 4_096, 16)`, `with_frame(4_095, 15, …)`, then
     `to_tuw3()` and back: the changed frame and a sample of others are correct by bits. No
     timing assertion.
@@ -437,7 +450,7 @@ Z frames at one Y (`Axis::Y`). Errors: `count == 0` → `ZeroCount`; insert `at 
 **Interfaces:** consumes `Wavetable`, `Axis`, `EditError`. Produces:
 
 ```rust
-pub struct Selection { /* inclusive y_start..=y_end, z_start..=z_end */ }   // Clone, Copy, Eq, Debug
+pub struct Selection { /* inclusive y_start..=y_end, z_start..=z_end */ }   // Debug, Clone, Copy, PartialEq, Eq
 impl Selection {
     pub fn frame(table: &Wavetable, y: u32, z: u32) -> Result<Selection, EditError>;
     pub fn row(table: &Wavetable, z: u32) -> Result<Selection, EditError>;      // all Y at one Z
@@ -447,7 +460,7 @@ impl Selection {
     pub fn y_range(&self) -> std::ops::RangeInclusive<u32>;
     pub fn z_range(&self) -> std::ops::RangeInclusive<u32>;
     pub fn contains(&self, y: u32, z: u32) -> bool;
-    pub fn after_insert(&self, axis: Axis, at: u32, count: u32) -> Selection;
+    pub fn after_insert(&self, axis: Axis, at: u32, count: u32, table_after: &Wavetable) -> Selection;
     pub fn after_remove(&self, axis: Axis, at: u32, count: u32, table_after: &Wavetable) -> Selection;
     pub fn fit(&self, table: &Wavetable) -> Selection;
 }
@@ -455,7 +468,8 @@ impl Selection {
 
 Rules per axis, with selection `[s, e]` (from the spec):
 - insert: `at <= s` → `[s + count, e + count]`; `s < at <= e` → `[s, e + count]`; `at > e` →
-  unchanged.
+  unchanged. Computed in `u64`, then fitted to `table_after`, so inconsistent arguments can't
+  overflow or leave the grid.
 - remove `[at, at + count - 1]`: the selected indices that remain, each lowered by the number of
   removed indices below it, give `[s', e']`; if none remain, the single index `s` clamped to
   `size_after - 1`.
@@ -471,12 +485,17 @@ Constructors return `IndexOutOfRange` or `OutsideGrid` for positions outside the
     → 4..=6; `at` = 3, 4 → 2..=6; `at` = 5 → 2..=4. Z untouched.
   - `remove_partial_and_full`: with y 2..=4 on 6 columns: remove `(0, 3)` (covers 0..=2) → 0..=1;
     remove `(3, 2)` → 2..=2; remove `(4, 2)` → 2..=3; remove `(2, 3)` (all) → 2..=2; remove
-    `(1, 5)` (all, leaves 1 column) → 0..=0.
+    `(1, 5)` (all, leaves 1 column) → 0..=0; remove `(0, 1)` (before) → 1..=3; remove `(5, 1)` (after) →
+    2..=4; remove `(3, 1)` (strictly inside) → 2..=3; on Z, with z 1..=3 on 5 rows, remove
+    `(0, 1)` → 0..=2.
   - `fit_clamps_into_any_grid`: y 2..=4 fitted to a 3-wide table → 2..=2; to a 1-wide → 0..=0.
-  - `adjusted_selections_stay_inside_the_grid` (proptest): random table (Task 2 strategy, axes up
-    to 6), random selection, random valid insert or remove on either axis; after
-    `after_insert`/`after_remove`, every index in both ranges is inside the new table; `fit` of a
-    random selection on a random table is inside it.
+  - `adjusted_selections_match_a_reference_model` (proptest): random table
+    (`tuw3_table(6)`), random selection, random valid insert or remove on either axis. A reference
+    model maps the *set* of selected indices one by one (insert: indices ≥ `at` move by `count`,
+    and inserted indices strictly inside the selection join it; remove: removed indices drop out,
+    the rest shift down; nothing left: the fallback rule). `after_insert` / `after_remove` equal the
+    model's `[min, max]` and lie inside the new table; `fit` of a random selection on a random
+    table lies inside it.
 - [ ] **Step 2: Run and see them fail:** `cargo test -p tuw-core --test selection`.
 - [ ] **Step 3: Implement** `Selection`; re-export it from `lib.rs`.
 - [ ] **Step 4: Run and see them pass**, then all `AGENTS.md` commands.
