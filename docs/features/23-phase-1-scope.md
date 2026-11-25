@@ -60,7 +60,9 @@ Phase 1 fails, even if every button works, if:
   or plugin dependencies; real-time rules for everything the audio callback reaches; tests first
   for DSP, float comparisons with justified tolerances, the edge cases (last frame on an axis,
   `y_size` or `z_size` of 1, frame sizes that are not a power of two).
-- TUW3 as specified in `docs/SPEC.md`, including its size limits; `tuw3` stays as it is.
+- TUW3 as specified in `docs/SPEC.md`, including its size limits. `tuw3` may gain additive public
+  functions (for example a metadata size check, #24), but no change to the format or to existing
+  behaviour.
 - D14 (samples are use-neutral; DC removal, phase canonicalisation and normalisation are editor
   actions on request; warnings appear in TUWE) and D15 (TUW3 holds full-band frames; recognised
   mip copies are dropped on import with a message).
