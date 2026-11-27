@@ -2,7 +2,8 @@
 
 //! Rendering the preview: no aliasing, bilinear morph, one level choice, DC, edge notes.
 //!
-//! Every control is set before `play()`, so nothing in these tests depends on smoothing.
+//! Every control is set before `play()`, so nothing in these tests depends on smoothing; the
+//! play fade-in scales the first samples of every render alike.
 
 mod common;
 
@@ -240,9 +241,11 @@ fn dc_removed() {
     let n = 1 << 14;
     let t = table(2048, 1, 1, &[sine(2048, 1.0, 0.5)]);
     for fs in [44_100.0f32, 48_000.0] {
-        // k / 2¹⁴ is exact in f32 and f64, so the phase makes exactly k whole cycles.
+        // k / 2¹⁴ is exact in f32 and f64, so the phase makes exactly k whole cycles over
+        // the n samples, from wherever they start. The warm-up skips the play fade-in, which
+        // would weight part of a cycle less than the rest.
         let f = fs * 37.0 / n as f32;
-        let out = render(&mut voice(&t, fs, f, 0.0, 0.0), 0, n);
+        let out = render(&mut voice(&t, fs, f, 0.0, 0.0), WARM_UP, n);
         let mean = out.iter().map(|&s| f64::from(s)).sum::<f64>() / n as f64;
         // The offset 0.5 must be gone; what remains is kernel ripple and f32 rounding of a
         // unit sine, orders of magnitude below 1e-4.

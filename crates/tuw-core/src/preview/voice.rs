@@ -9,7 +9,10 @@
 use std::sync::Arc;
 
 use super::kernel::Kernel;
-use super::{LevelWeights, PreparedTable, PreviewError, level_weights};
+use super::{
+    LevelWeights, PLAY_FADE_SECONDS, PreparedTable, PreviewError, SMOOTHING_SECONDS,
+    SWAP_FADE_SECONDS, level_weights,
+};
 
 /// Weights meaning "nothing sounds".
 const SILENT: LevelWeights = LevelWeights {
@@ -18,24 +21,129 @@ const SILENT: LevelWeights = LevelWeights {
     w_second: 0.0,
 };
 
+/// A linear ramp of one value, advanced once per output sample.
+///
+/// Each value is computed from the start of the ramp, not accumulated, so rounding never
+/// drifts; the last step assigns the target, so the ramp ends on it exactly.
+#[derive(Debug, Clone, Copy)]
+struct Ramp {
+    value: f32,
+    start: f32,
+    target: f32,
+    /// Samples the ramp takes, and how many have passed; the ramp runs while `done < len`.
+    len: u32,
+    done: u32,
+}
+
+impl Ramp {
+    fn at(value: f32) -> Ramp {
+        Ramp {
+            value,
+            start: value,
+            target: value,
+            len: 0,
+            done: 0,
+        }
+    }
+
+    /// Sets `value` to `target` at once, ending any ramp.
+    fn jump(&mut self, target: f32) {
+        *self = Ramp::at(target);
+    }
+
+    /// Starts a ramp from the current value to `target` over `len` samples (a jump if `len`
+    /// is 0).
+    fn to(&mut self, target: f32, len: u32) {
+        if len == 0 {
+            self.jump(target);
+        } else {
+            *self = Ramp {
+                value: self.value,
+                start: self.value,
+                target,
+                len,
+                done: 0,
+            };
+        }
+    }
+
+    fn is_running(&self) -> bool {
+        self.done < self.len
+    }
+
+    /// One sample further.
+    fn advance(&mut self) {
+        if !self.is_running() {
+            return;
+        }
+        self.done += 1;
+        self.value = if self.done >= self.len {
+            self.target
+        } else {
+            let t = f64::from(self.done) / f64::from(self.len);
+            (f64::from(self.start) + (f64::from(self.target) - f64::from(self.start)) * t) as f32
+        };
+    }
+}
+
+/// `seconds × sample_rate`, rounded, as a sample count; 0 (no ramp) when `seconds` is not
+/// finite or not positive.
+fn ramp_samples(seconds: f32, sample_rate: f32) -> u32 {
+    if !(seconds.is_finite() && seconds > 0.0) {
+        return 0;
+    }
+    let n = (f64::from(seconds) * f64::from(sample_rate)).round();
+    // `as` saturates, so a huge time gives the longest ramp a u32 can count.
+    n as u32
+}
+
 /// A single-threaded preview voice.
 ///
 /// All frames share one phase accumulator, so morphing never jumps in phase. Each output
 /// sample is the bilinear mix of the four frames around the playhead, each read from the same
 /// one or two band-limited levels (chosen by [`level_weights`] from the note alone).
+///
+/// # Smoothing and fades
+///
+/// While the voice sounds (its play gain is above 0, or ramping up from 0 after
+/// [`play`](Voice::play)), [`set_playhead`](Voice::set_playhead) and
+/// [`set_frequency`](Voice::set_frequency) ramp linearly to the new value over
+/// [`SMOOTHING_SECONDS`]; a new value mid-ramp starts a new ramp from where it is. While the
+/// voice is silent, they jump. [`play`](Voice::play) and [`stop`](Voice::stop) ramp the gain
+/// over [`PLAY_FADE_SECONDS`]; after the stop fade the output is exact zeros.
+///
+/// # Table swaps
+///
+/// [`set_table`](Voice::set_table) into a voice without a table installs it. With a table
+/// and silent, it replaces the table at once and *retires* the old one. With a table and
+/// sounding, the new table fades in and the old one fades out linearly over
+/// [`SWAP_FADE_SECONDS`]; both play at the same phase, playhead and note (each table clamps the
+/// playhead into its own grid), and the old one is retired when the fade ends. A retired table
+/// waits for [`take_retired`](Voice::take_retired). The voice never clones or drops a table: it
+/// only moves the ones it is given.
 pub struct Voice {
     sample_rate: f32,
     kernel: Kernel,
+    /// The table playing (fading in during a swap).
     current: Option<Arc<PreparedTable>>,
+    /// The table fading out during a swap.
+    fading: Option<Arc<PreparedTable>>,
+    /// A table the voice no longer needs, waiting for [`Voice::take_retired`].
+    retired: Option<Arc<PreparedTable>>,
     /// Position in the period, `0.0..1.0`.
     phase: f64,
-    /// Playhead as last set (finite, not yet clamped: each table clamps it to its own grid).
-    y: f32,
-    z: f32,
-    /// Note in Hz; 0 when the last value set was not a usable frequency (silence).
-    frequency: f32,
-    /// Output gain: 1 while playing, 0 while stopped.
-    gain: f32,
+    /// Smoothed playhead (finite, not yet clamped: each table clamps it to its own grid).
+    y: Ramp,
+    z: Ramp,
+    /// Smoothed note in Hz; 0 while the last value set was not a usable frequency (silence).
+    frequency: Ramp,
+    /// Output gain, 0 (stopped) to 1 (playing).
+    gain: Ramp,
+    /// Weight of `current` during a swap, ramping 0 to 1; `fading` gets the rest.
+    mix: Ramp,
+    smoothing_len: u32,
+    swap_len: u32,
+    play_len: u32,
     last_weights: LevelWeights,
 }
 
@@ -44,16 +152,17 @@ impl std::fmt::Debug for Voice {
         f.debug_struct("Voice")
             .field("sample_rate", &self.sample_rate)
             .field("has_table", &self.current.is_some())
-            .field("y", &self.y)
-            .field("z", &self.z)
-            .field("frequency", &self.frequency)
-            .field("gain", &self.gain)
+            .field("is_swapping", &self.is_swapping())
+            .field("playhead", &self.playhead())
+            .field("frequency", &self.frequency())
+            .field("gain", &self.gain.value)
             .finish_non_exhaustive()
     }
 }
 
 impl Voice {
-    /// A stopped voice with no table, at the playhead (0, 0) and no note.
+    /// A stopped voice with no table, at the playhead (0, 0) and no note, smoothing over
+    /// [`SMOOTHING_SECONDS`] and fading over [`SWAP_FADE_SECONDS`] and [`PLAY_FADE_SECONDS`].
     ///
     /// Allocates the interpolation kernel; call it off the audio thread.
     ///
@@ -61,6 +170,28 @@ impl Voice {
     ///
     /// [`PreviewError::InvalidSampleRate`] when `sample_rate` is not finite or not positive.
     pub fn new(sample_rate: f32) -> Result<Voice, PreviewError> {
+        Voice::with_times(
+            sample_rate,
+            SMOOTHING_SECONDS,
+            SWAP_FADE_SECONDS,
+            PLAY_FADE_SECONDS,
+        )
+    }
+
+    /// Like [`Voice::new`], with the smoothing time and the swap and play/stop fade times
+    /// given in seconds. Meant for tests and experiments (a time of 0 shows the click the
+    /// fade prevents); the preview itself uses [`Voice::new`]. A time that is not finite or
+    /// not positive means no ramp at all.
+    ///
+    /// # Errors
+    ///
+    /// [`PreviewError::InvalidSampleRate`] when `sample_rate` is not finite or not positive.
+    pub fn with_times(
+        sample_rate: f32,
+        smoothing_seconds: f32,
+        swap_fade_seconds: f32,
+        play_fade_seconds: f32,
+    ) -> Result<Voice, PreviewError> {
         if !(sample_rate.is_finite() && sample_rate > 0.0) {
             return Err(PreviewError::InvalidSampleRate);
         }
@@ -68,49 +199,118 @@ impl Voice {
             sample_rate,
             kernel: Kernel::new(),
             current: None,
+            fading: None,
+            retired: None,
             phase: 0.0,
-            y: 0.0,
-            z: 0.0,
-            frequency: 0.0,
-            gain: 0.0,
+            y: Ramp::at(0.0),
+            z: Ramp::at(0.0),
+            frequency: Ramp::at(0.0),
+            gain: Ramp::at(0.0),
+            mix: Ramp::at(1.0),
+            smoothing_len: ramp_samples(smoothing_seconds, sample_rate),
+            swap_len: ramp_samples(swap_fade_seconds, sample_rate),
+            play_len: ramp_samples(play_fade_seconds, sample_rate),
             last_weights: SILENT,
         })
     }
 
-    /// Plays `table` from now on and gives back the table it replaces, if any.
-    ///
-    /// The voice never drops a table: the caller disposes of the one it gets back (off the
-    /// audio thread).
-    pub fn set_table(&mut self, table: Arc<PreparedTable>) -> Option<Arc<PreparedTable>> {
-        self.current.replace(table)
+    /// Whether the voice sounds: its gain is above 0 or heading there.
+    fn is_sounding(&self) -> bool {
+        self.gain.value > 0.0 || self.gain.target > 0.0
     }
 
-    /// Moves the playhead to (`y`, `z`), in frames. Each coordinate is clamped into the grid
-    /// of the table being played; a coordinate that is not finite is ignored (the previous
-    /// value stays).
+    /// Plays `table` from now on (see *Table swaps* on [`Voice`]). Returns `None` when the
+    /// voice took the table, and gives it back unused (`Some`) while
+    /// [`is_swapping`](Voice::is_swapping): try again later.
+    pub fn set_table(&mut self, table: Arc<PreparedTable>) -> Option<Arc<PreparedTable>> {
+        if self.is_swapping() {
+            return Some(table);
+        }
+        // Not swapping, so `fading` and `retired` are both empty.
+        let Some(old) = self.current.take() else {
+            self.current = Some(table);
+            return None;
+        };
+        if self.is_sounding() && self.swap_len > 0 {
+            self.fading = Some(old);
+            self.mix.jump(0.0);
+            self.mix.to(1.0, self.swap_len);
+        } else {
+            self.retired = Some(old);
+        }
+        self.current = Some(table);
+        None
+    }
+
+    /// Whether a swap is fading, or a retired table waits for
+    /// [`take_retired`](Voice::take_retired). [`set_table`](Voice::set_table) refuses a table
+    /// meanwhile.
+    pub fn is_swapping(&self) -> bool {
+        self.fading.is_some() || self.retired.is_some()
+    }
+
+    /// Hands out the table a swap retired, if any; the caller disposes of it (off the audio
+    /// thread).
+    pub fn take_retired(&mut self) -> Option<Arc<PreparedTable>> {
+        self.retired.take()
+    }
+
+    /// Moves the playhead to (`y`, `z`), in frames: smoothly while sounding, at once while
+    /// silent. Each coordinate is clamped into the grid of the table being played; a
+    /// coordinate that is not finite is ignored (the previous value, or ramp, stays).
     pub fn set_playhead(&mut self, y: f32, z: f32) {
+        let len = self.ramp_len();
         if y.is_finite() {
-            self.y = y;
+            self.y.to(y, len);
         }
         if z.is_finite() {
-            self.z = z;
+            self.z.to(z, len);
         }
     }
 
-    /// Sets the note to `hz`. A value that is not finite or not positive means silence: no
-    /// level sounds and the phase holds.
+    /// Sets the note to `hz`: smoothly while sounding, at once while silent. A value that is
+    /// not finite or not positive means silence at once: no level sounds and the phase holds.
+    /// Coming back from such a value, the note jumps too (there is nothing to ramp from).
     pub fn set_frequency(&mut self, hz: f32) {
-        self.frequency = if hz.is_finite() && hz > 0.0 { hz } else { 0.0 };
+        if !(hz.is_finite() && hz > 0.0) {
+            self.frequency.jump(0.0);
+        } else if self.frequency.value > 0.0 {
+            self.frequency.to(hz, self.ramp_len());
+        } else {
+            self.frequency.jump(hz);
+        }
     }
 
-    /// Starts sounding.
+    /// The smoothing ramp length now: 0 (a jump) while silent.
+    fn ramp_len(&self) -> u32 {
+        if self.is_sounding() {
+            self.smoothing_len
+        } else {
+            0
+        }
+    }
+
+    /// The smoothed playhead (`y`, `z`) as of the last rendered sample, before each table
+    /// clamps it into its grid. For tests: it shows the ramp.
+    pub fn playhead(&self) -> (f32, f32) {
+        (self.y.value, self.z.value)
+    }
+
+    /// The smoothed note in Hz as of the last rendered sample (0 for silence). For tests: it
+    /// shows the ramp.
+    pub fn frequency(&self) -> f32 {
+        self.frequency.value
+    }
+
+    /// Starts sounding, fading in from the current gain.
     pub fn play(&mut self) {
-        self.gain = 1.0;
+        self.gain.to(1.0, self.play_len);
     }
 
-    /// Stops sounding; the output is silence until the next [`play`](Voice::play).
+    /// Fades out; after the fade the output is exact zeros until the next
+    /// [`play`](Voice::play).
     pub fn stop(&mut self) {
-        self.gain = 0.0;
+        self.gain.to(0.0, self.play_len);
     }
 
     /// The level weights of the current table at the last rendered sample (silent weights
@@ -122,27 +322,60 @@ impl Voice {
 
     /// Fills `out` with the next samples. Real-time safe.
     pub fn render(&mut self, out: &mut [f32]) {
-        let step = f64::from(self.frequency) / f64::from(self.sample_rate);
         let max = f64::from(f32::MAX);
         for sample in out.iter_mut() {
+            self.gain.advance();
+            self.frequency.advance();
+            self.y.advance();
+            self.z.advance();
+            self.mix.advance();
+            let (y, z, frequency) = (self.y.value, self.z.value, self.frequency.value);
+            let mix = if self.fading.is_some() {
+                f64::from(self.mix.value)
+            } else {
+                1.0
+            };
+
             let mut sum = 0.0f64;
+            self.last_weights = SILENT;
             if let Some(table) = &self.current {
                 let (value, weights) = render_table(
                     &self.kernel,
                     table,
                     self.phase,
-                    self.y,
-                    self.z,
-                    self.frequency,
+                    y,
+                    z,
+                    frequency,
                     self.sample_rate,
                 );
-                sum += value;
+                sum += mix * value;
                 self.last_weights = weights;
-            } else {
-                self.last_weights = SILENT;
             }
-            *sample = (sum * f64::from(self.gain)).clamp(-max, max) as f32;
-            let next = self.phase + step;
+            if let Some(old) = &self.fading {
+                let (value, _) = render_table(
+                    &self.kernel,
+                    old,
+                    self.phase,
+                    y,
+                    z,
+                    frequency,
+                    self.sample_rate,
+                );
+                sum += (1.0 - mix) * value;
+            }
+            // At gain 0 write +0.0 itself: a negative sum times 0 would be −0.0.
+            *sample = if self.gain.value > 0.0 {
+                (sum * f64::from(self.gain.value)).clamp(-max, max) as f32
+            } else {
+                0.0
+            };
+
+            // The fade has ended: the old table is retired (the slot is empty, since a swap
+            // only starts while nothing is retired).
+            if self.fading.is_some() && !self.mix.is_running() && self.retired.is_none() {
+                self.retired = self.fading.take();
+            }
+            let next = self.phase + f64::from(frequency) / f64::from(self.sample_rate);
             self.phase = next - next.floor();
         }
     }
