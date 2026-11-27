@@ -158,3 +158,7 @@ approval. Remove entries whose cause is gone.
   escape *is* valid JSON (RFC 8259 §8.2).
 - **DSP prose in `DESIGN-NOTES.md` is untested.** Have a fresh reviewer check DSP claims
   before merging; PR #16 needed seven fixes in PR #17.
+- **A `Wavetable` clone shares every frame, so it can't prove a table is unchanged.** Comparing
+  a table with a clone taken before an edit can never fail. Take a deep snapshot (`to_tuw3()`)
+  instead, but not of huge fixtures: on a 2²⁸-sample table it cost 2 GB of memory per test,
+  so check sizes there (#24).
