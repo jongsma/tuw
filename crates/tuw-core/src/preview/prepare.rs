@@ -108,7 +108,8 @@ impl fmt::Debug for PreparedTable {
 /// Keeps its FFT plans between calls. Frames that appear at several positions of one table
 /// (a silent table shares one buffer) are built once.
 pub struct Preparer {
-    planner: FftPlanner<f32>,
+    /// f64, so that frames with samples up to ±`f32::MAX` cannot overflow.
+    planner: FftPlanner<f64>,
     /// Keyed by [`Frame::addr`]. The entry holds a clone of the frame, so its address can't be
     /// reused by another buffer while it is cached.
     cache: HashMap<usize, (Frame, Arc<PreparedFrame>)>,
@@ -200,18 +201,26 @@ impl Preparer {
     /// conjugates go into an `M`-point spectrum with everything else zero, and an inverse FFT
     /// of length `M` gives one period resampled to `M` samples. rustfft does not normalise,
     /// so the result is scaled by `1 / N`.
+    ///
+    /// The FFTs run in `f64`: a frame may hold any finite `f32`, up to ±`f32::MAX`, and its
+    /// spectrum (up to `N × f32::MAX`) would overflow `f32`. Each stored sample is clamped to
+    /// ±`f32::MAX` (band-limiting can raise the peak), so finite input always gives finite
+    /// levels.
     fn build(&mut self, samples: &[f32], levels: &[u32]) -> PreparedFrame {
         let n = samples.len();
-        let mut spectrum: Vec<Complex<f32>> =
-            samples.iter().map(|&s| Complex::new(s, 0.0)).collect();
+        let mut spectrum: Vec<Complex<f64>> = samples
+            .iter()
+            .map(|&s| Complex::new(f64::from(s), 0.0))
+            .collect();
         self.planner.plan_fft_forward(n).process(&mut spectrum);
-        let scale = 1.0 / n as f32;
+        let scale = 1.0 / n as f64;
+        let max = f64::from(f32::MAX);
 
         let levels = levels
             .iter()
             .map(|&h| {
                 let m = level_length(h);
-                let mut buf = vec![Complex::new(0.0f32, 0.0); m];
+                let mut buf = vec![Complex::new(0.0f64, 0.0); m];
                 // h <= (n - 1) / 2 and m >= 4 h, so bins k and m - k never collide and
                 // spectrum[k] exists.
                 for (k, &bin) in spectrum.iter().enumerate().take(h as usize + 1).skip(1) {
@@ -219,7 +228,9 @@ impl Preparer {
                     buf[m - k] = bin.conj();
                 }
                 self.planner.plan_fft_inverse(m).process(&mut buf);
-                buf.iter().map(|c| c.re * scale).collect()
+                buf.iter()
+                    .map(|c| (c.re * scale).clamp(-max, max) as f32)
+                    .collect()
             })
             .collect();
         PreparedFrame { levels }

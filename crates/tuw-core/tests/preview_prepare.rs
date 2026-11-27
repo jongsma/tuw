@@ -73,12 +73,12 @@ proptest! {
             prop_assert_eq!(level.len(), level_length(h));
             let mags = spectrum(level);
             let largest = mags.iter().cloned().fold(0.0, f64::max);
-            // The level is one f32 inverse FFT (length up to 2^16, so at most 16 radix stages),
-            // fed by one f32 forward FFT of the frame. Each stage adds about f32::EPSILON
-            // (1.2e-7) of the signal's norm, so the stray energy in a bin that should be empty
-            // is of order 16 x 1.2e-7 x sqrt(2 H) x largest, about 1e-5 of the largest bin even
-            // for flat spectra; 1e-4 leaves a margin. The absolute 1e-6 covers all-zero and
-            // near-zero frames, where the relative bound is meaningless.
+            // The levels are computed in f64 and stored as f32, so the stray content of a bin
+            // that should be empty is the f32 rounding of each sample (relative 6e-8) spread
+            // over the spectrum: of order 6e-8 x sqrt(2 H) x largest, below 3e-6 of the largest
+            // bin even for flat spectra. 1e-4 is also what an all-f32 path (up to 16 radix
+            // stages of 1.2e-7 each on lengths <= 2^16) would meet, with a margin. The absolute
+            // 1e-6 covers all-zero and near-zero frames, where the relative bound is meaningless.
             let bound = 1e-4 * largest + 1e-6;
             prop_assert!(mags[0] <= bound, "level {}: DC {} > {}", l, mags[0], bound);
             for (k, &m) in mags.iter().enumerate().take(level.len() / 2 + 1).skip(h as usize + 1) {
@@ -125,8 +125,8 @@ fn levels_keep_the_harmonics() {
                     .iter()
                     .find(|&&(pk, _)| pk as usize == k)
                     .map_or(0.0, |&(_, a)| a);
-                // f32 samples (relative error 6e-8) and f32 FFTs of length <= 2048 (11 stages
-                // of round-off, about 1e-6 of the signal) are far below a relative error of
+                // f32 input and output samples (relative error 6e-8 each) and f64 FFTs are far
+                // below a relative error of
                 // 1e-4 for the kept harmonics; absent harmonics are held to 1e-4 of the
                 // fundamental (amplitude 1).
                 let tolerance = if expected > 0.0 {
@@ -195,4 +195,24 @@ fn frame_size_8() {
     assert_eq!(frame.level_count(), 3);
     assert!(prepared.frame(1, 0).is_none());
     assert!(prepared.frame(0, 1).is_none());
+}
+
+/// Every valid table gives finite levels, even with samples at ±f32::MAX.
+#[test]
+fn huge_samples_stay_finite() {
+    let alternating: Vec<f32> = (0..2048)
+        .map(|i| if i % 2 == 0 { f32::MAX } else { -f32::MAX })
+        .collect();
+    let mut spike = vec![f32::MAX; 2048];
+    spike[1000] = -f32::MAX;
+    for samples in [alternating, spike] {
+        let prepared = prepare(&one_frame(&samples));
+        let frame = prepared.frame(0, 0).unwrap();
+        for l in 0..frame.level_count() {
+            assert!(
+                frame.level(l).iter().all(|s| s.is_finite()),
+                "level {l} has a non-finite sample"
+            );
+        }
+    }
 }
