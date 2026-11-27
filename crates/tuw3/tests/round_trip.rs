@@ -154,3 +154,30 @@ fn unknown_numbers_keep_their_value() {
         r#"{"big":18446744073709551615,"neg":-9223372036854775808,"x":100000.0}"#
     );
 }
+
+/// #24: `encoded_len` is the `meta_len` that `write()` stores in the header (bytes 20..24).
+#[test]
+fn encoded_len_matches_meta_len() {
+    let mut named = Metadata::default();
+    named.name = Some("Saw".to_owned());
+    let mut non_ascii = Metadata::default();
+    non_ascii.name = Some("Vokaal é".to_owned());
+    non_ascii.author = Some("Zoë 音".to_owned());
+    non_ascii.license = Some("CC-BY-4.0 ✓".to_owned());
+    non_ascii.y_label = Some("Klinker ü".to_owned());
+    non_ascii.z_label = Some("Helderheid ß".to_owned());
+    non_ascii.description = Some("a-e-i-o-u 🎹".to_owned());
+
+    for (metadata, expect_empty) in [
+        (Metadata::default(), true),
+        (named, false),
+        (non_ascii, false),
+    ] {
+        let samples = vec![0.0; 8];
+        let table = Table::new(8, 1, 1, samples, metadata.clone()).unwrap();
+        let bytes = tuw3::write(&table);
+        let meta_len = u32::from_le_bytes(bytes[20..24].try_into().unwrap()) as usize;
+        assert_eq!(metadata.encoded_len(), meta_len);
+        assert_eq!(meta_len == 0, expect_empty);
+    }
+}
