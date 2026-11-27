@@ -27,8 +27,10 @@ is done together, never by a loop. It follows `docs/WORKFLOW.md`; the only addit
    - Optionally, when the maintainer wants to see the plan before the loop builds it:
      `superpowers:writing-plans` into the same doc's *Plan* and *Tasks*, status *Planned*. The
      loop then uses that plan instead of writing its own.
-4. **Branch:** L / Format: `git switch -c <type>/<n>-<slug> origin/main`, commit the feature doc
-   as the branch's first commit (`docs(<crate>): spec <topic> (#<n>)`), switch back. Never push.
+4. **Branch:** L / Format: `git switch --create <type>/<n>-<slug> origin/main` (the long form:
+   `-c` matches the `git * -c *` deny rule in `.claude/settings.json`), then
+   `git branch --unset-upstream` so the branch doesn't track `main`. Commit the feature doc as the
+   branch's first commit (`docs(<crate>): spec <topic> (#<n>)`), switch back. Never push.
 5. **Ready:** the track in the issue body, then, with the maintainer's OK, add the `loop:ready`
    label (`gh label create loop:ready --description "Specced; the Claude loop may build it"` the
    first time). The loop picks it up on its next iteration.
