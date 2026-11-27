@@ -139,8 +139,96 @@ fn levels_keep_the_harmonics() {
                     "n = {n}, level {l} (H = {h}): harmonic {k} = {amplitude}, expected {expected}"
                 );
             }
+            // The waveform itself, not only the magnitudes: a time-reversed or shifted level
+            // has the same spectrum. Every part is kept once H >= 7. Samples have magnitude
+            // <= 1.75, so f32 rounding (6e-8 relative) is far below 1e-5.
+            if h >= 7 {
+                for (j, &s) in level.iter().enumerate() {
+                    let expected: f64 = parts
+                        .iter()
+                        .map(|&(k, a)| {
+                            a * (2.0 * std::f64::consts::PI * f64::from(k) * j as f64 / m).sin()
+                        })
+                        .sum();
+                    assert!(
+                        (f64::from(s) - expected).abs() <= 1e-5,
+                        "n = {n}, level {l}: sample {j} = {s}, expected {expected}"
+                    );
+                }
+            }
         }
     }
+}
+
+/// A table of `y` x `z` frames that all differ (each a different constant level).
+fn varied(y_size: u32, z_size: u32) -> Wavetable {
+    let mut table = Wavetable::silent(8, y_size, z_size).unwrap();
+    for z in 0..z_size {
+        for y in 0..y_size {
+            let v = (z * y_size + y + 1) as f32 * 0.01;
+            table = table
+                .with_frame(y, z, &[v, -v, v, -v, v, v, -v, -v])
+                .unwrap();
+        }
+    }
+    table
+}
+
+/// AC7: a first prepare builds every distinct frame, and a shared buffer only once.
+#[test]
+fn first_prepare_builds_all() {
+    let mut preparer = Preparer::new();
+    preparer.prepare(&varied(4, 3)).unwrap();
+    assert_eq!(preparer.frames_built_last(), 12);
+    preparer
+        .prepare(&Wavetable::silent(8, 4, 3).unwrap())
+        .unwrap();
+    assert_eq!(preparer.frames_built_last(), 1);
+}
+
+/// AC7: after one frame is replaced, only that frame is built; the rest are reused.
+#[test]
+fn one_changed_frame_builds_one() {
+    let mut preparer = Preparer::new();
+    let before = varied(4, 3);
+    let first = preparer.prepare(&before).unwrap();
+    let after = before
+        .with_frame(2, 1, &[0.5, 0.1, -0.3, 0.2, 0.0, 0.4, -0.5, 0.3])
+        .unwrap();
+    let second = preparer.prepare(&after).unwrap();
+    assert_eq!(preparer.frames_built_last(), 1);
+    for z in 0..3 {
+        for y in 0..4 {
+            let (a, b) = (first.frame(y, z).unwrap(), second.frame(y, z).unwrap());
+            assert_eq!(std::sync::Arc::ptr_eq(a, b), (y, z) != (2, 1), "({y}, {z})");
+        }
+    }
+}
+
+/// AC7: the cache holds only the latest table's frames.
+#[test]
+fn cache_holds_only_the_latest() {
+    let mut preparer = Preparer::new();
+    let a = varied(4, 3);
+    preparer.prepare(&a).unwrap();
+    preparer.prepare(&varied(2, 2)).unwrap();
+    preparer.prepare(&a).unwrap();
+    assert_eq!(preparer.frames_built_last(), 12);
+}
+
+/// A prepare that fails leaves the cache as it was.
+#[test]
+fn failed_prepare_keeps_the_cache() {
+    let mut preparer = Preparer::new();
+    let a = varied(4, 3);
+    preparer.prepare(&a).unwrap();
+    assert!(
+        preparer
+            .prepare(&Wavetable::silent(8, 2048, 1025).unwrap())
+            .is_err()
+    );
+    preparer.prepare(&a).unwrap();
+    assert_eq!(preparer.frames_built_last(), 0);
 }
 
 /// AC11: the size limit, the memory cap, and the source left unchanged.

@@ -106,7 +106,8 @@ impl fmt::Debug for PreparedTable {
 /// Prepares tables for the preview, on the UI thread.
 ///
 /// Keeps its FFT plans between calls. Frames that appear at several positions of one table
-/// (a silent table shares one buffer) are built once.
+/// (a silent table shares one buffer) are built once, and a frame that is the same buffer as in
+/// the previous successful `prepare` is reused, so editing one frame rebuilds only that one.
 pub struct Preparer {
     /// f64, so that frames with samples up to ±`f32::MAX` cannot overflow.
     planner: FftPlanner<f64>,
@@ -162,18 +163,26 @@ impl Preparer {
         let per_frame: usize = levels.iter().map(|&h| level_length(h)).sum();
         let positions = y_size as usize * z_size as usize;
 
+        // Nothing below can fail, so taking the old cache out is safe: the size check above
+        // is the only early return.
+        let previous = std::mem::take(&mut self.cache);
         let mut cache = HashMap::new();
         let mut built = 0;
         let mut frames = Vec::with_capacity(positions);
         for (_, _, frame) in table.frames() {
-            let prepared = match cache.get(&frame.addr()) {
-                Some((_, prepared)) => Arc::clone(prepared),
-                None => {
-                    let prepared = Arc::new(self.build(frame.samples(), &levels));
-                    built += 1;
-                    cache.insert(frame.addr(), (frame.clone(), Arc::clone(&prepared)));
-                    prepared
-                }
+            // This table's frames first, then the previous table's.
+            let prepared = if let Some((_, prepared)) = cache.get(&frame.addr()) {
+                Arc::clone(prepared)
+            } else {
+                let prepared = match previous.get(&frame.addr()) {
+                    Some((_, prepared)) => Arc::clone(prepared),
+                    None => {
+                        built += 1;
+                        Arc::new(self.build(frame.samples(), &levels))
+                    }
+                };
+                cache.insert(frame.addr(), (frame.clone(), Arc::clone(&prepared)));
+                prepared
             };
             frames.push(prepared);
         }
