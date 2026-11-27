@@ -158,6 +158,7 @@ impl Document {
     {
         let step = self.open.as_mut().ok_or(DocumentError::NoOpenStep)?;
         step.result = edit(&self.states[self.cursor].version)?;
+        self.refit();
         Ok(())
     }
 
@@ -171,6 +172,7 @@ impl Document {
     pub fn finish_step(&mut self) -> Result<(), DocumentError> {
         let step = self.open.take().ok_or(DocumentError::NoOpenStep)?;
         if Wavetable::ptr_eq(&step.result, self.finished()) {
+            self.refit();
             return Ok(());
         }
         self.states.truncate(self.cursor + 1);
@@ -186,6 +188,7 @@ impl Document {
         }
         self.cursor = self.states.len() - 1;
         self.change_id = ChangeId::fresh();
+        self.refit();
         Ok(())
     }
 
@@ -195,10 +198,9 @@ impl Document {
     ///
     /// [`DocumentError::NoOpenStep`] when no step is open.
     pub fn cancel_step(&mut self) -> Result<(), DocumentError> {
-        self.open
-            .take()
-            .map(|_| ())
-            .ok_or(DocumentError::NoOpenStep)
+        self.open.take().ok_or(DocumentError::NoOpenStep)?;
+        self.refit();
+        Ok(())
     }
 
     /// A whole step in one call: begin, one update, finish. If `edit` refuses, nothing changes
@@ -214,7 +216,8 @@ impl Document {
     {
         self.begin_step(label)?;
         if let Err(e) = self.update_step(edit) {
-            self.open = None;
+            // The step is open here, so cancelling cannot fail.
+            let _ = self.cancel_step();
             return Err(e);
         }
         self.finish_step()
@@ -235,6 +238,7 @@ impl Document {
         }
         self.cursor -= 1;
         self.change_id = ChangeId::fresh();
+        self.refit();
         Ok(())
     }
 
@@ -253,6 +257,7 @@ impl Document {
         }
         self.cursor += 1;
         self.change_id = ChangeId::fresh();
+        self.refit();
         Ok(())
     }
 
@@ -273,5 +278,16 @@ impl Document {
     /// modified.
     pub fn is_modified(&self) -> bool {
         self.states[self.cursor].serial != self.saved
+    }
+
+    /// Fits the selection to [`current`](Self::current); called after every change of it.
+    fn refit(&mut self) {
+        self.selection = self.selection.fit(self.current());
+    }
+
+    /// Marks the finished version as the saved one. [`is_modified`](Self::is_modified) is false
+    /// until the content moves to another state.
+    pub fn mark_saved(&mut self) {
+        self.saved = self.states[self.cursor].serial;
     }
 }
