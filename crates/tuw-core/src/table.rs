@@ -29,6 +29,12 @@ impl Frame {
     pub fn ptr_eq(a: &Frame, b: &Frame) -> bool {
         Arc::ptr_eq(&a.0, &b.0)
     }
+
+    /// The address of this frame's buffer, as a cache key. Two frames have the same address
+    /// exactly when they are the same buffer, as long as one of them is alive.
+    pub(crate) fn addr(&self) -> usize {
+        Arc::as_ptr(&self.0).cast::<f32>() as usize
+    }
 }
 
 impl fmt::Debug for Frame {
