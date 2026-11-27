@@ -21,8 +21,9 @@
 //!   [`EditError`] and changes nothing.
 //! - [`Selection`] is a rectangle on the grid. It is a separate value, not part of any
 //!   version, and selecting is not undoable. After an insert or remove, adjust it with
-//!   [`Selection::after_insert`] or [`Selection::after_remove`]. A [`Document`] does this
-//!   fitting for you: it fits its selection into the grid on every change.
+//!   [`Selection::after_insert`] or [`Selection::after_remove`]. A [`Document`] only fits its
+//!   selection into the grid as a safety net; a tool that inserts or removes rows or columns
+//!   still computes the adjusted selection and calls [`Document::set_selection`] itself.
 //!
 //! # The edit model
 //!
@@ -38,13 +39,14 @@
 //!   `update_step` on every mouse move with the total change so far, and nothing piles up.
 //! - **The preview.** While a step is open, [`Document::current`] is its latest result.
 //!   [`Document::finished`] is always the state under the undo cursor, and
-//!   [`Document::change_id`] changes only when that state does. A preview can cache work
-//!   per `ChangeId` and show `current` while the step is open.
+//!   [`Document::change_id`] changes only when that state does. A preview plays
+//!   `finished()`, caching work per `ChangeId`; the view shows `current()`, which also
+//!   follows the open step.
 //! - **Undo and redo** ([`Document::undo`], [`Document::redo`]) refuse while a step is open.
 //!   A step that changed nothing records nothing.
-//! - **Limit and saved marker.** The history keeps at most [`DEFAULT_HISTORY_LIMIT`] undo
-//!   steps unless you choose another. [`Document::is_modified`] and [`Document::mark_saved`]
-//!   track whether the state under the cursor is the saved one.
+//! - **Limit and saved marker.** The history keeps at most the limit given to
+//!   [`Document::new`] as undo steps; [`DEFAULT_HISTORY_LIMIT`] is a sensible value to pass.
+//!   [`Document::is_modified`] and [`Document::mark_saved`] track whether the state under the cursor is the saved one.
 //! - **UI-thread code.** A `Document` allocates, so it must never be used from an audio
 //!   callback. Hand the audio thread a finished [`Wavetable`] instead.
 //!

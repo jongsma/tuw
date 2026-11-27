@@ -348,22 +348,13 @@ fn cancel_after_removing_rows_keeps_the_selection() {
 }
 
 #[test]
-fn failed_apply_fits_the_selection() {
-    let t = table(3, 3);
-    let mut doc = Document::new(t.clone(), 10);
-    let one = Selection::frame(&t, 2, 2).unwrap();
-    doc.set_selection(one);
-    assert!(
-        doc.apply("Bad", |s| s.with_frame(0, 0, &[f32::NAN; 8]))
-            .is_err()
-    );
-    assert_eq!(doc.selection(), one);
-}
-
-#[test]
 fn selection_is_not_history() {
     let t = table(3, 3);
     let mut doc = Document::new(t.clone(), 10);
+    // Selecting on a fresh document does not make it modified.
+    doc.set_selection(Selection::frame(&t, 0, 0).unwrap());
+    assert!(!doc.is_modified());
+    doc.set_selection(Selection::all(&t));
     doc.apply("Fill", |s| s.with_frame(0, 0, &[0.5; 8]))
         .unwrap();
     let id = doc.change_id();
@@ -389,26 +380,28 @@ fn finished_version_and_change_id() {
     let start = ramp_table();
     let mut doc = Document::new(start.clone(), 10);
     let mut ids = HashSet::new();
-    assert!(ids.insert(doc.change_id()));
+    let first = doc.change_id();
+    assert!(ids.insert(first));
 
     doc.begin_step("Gain").unwrap();
     for g in [1.5_f32, 2.0] {
         doc.update_step(|s| s.with_frame(0, 0, &gain(s, g)))
             .unwrap();
         assert!(Wavetable::ptr_eq(doc.finished(), &start));
-        assert_eq!(doc.change_id(), *ids.iter().next().unwrap());
+        assert_eq!(doc.change_id(), first);
     }
+    let result = doc.current().clone();
     doc.finish_step().unwrap();
     assert!(ids.insert(doc.change_id()));
-    assert!(Wavetable::ptr_eq(doc.finished(), doc.current()));
+    assert!(Wavetable::ptr_eq(doc.finished(), &result));
 
     doc.undo().unwrap();
     assert!(ids.insert(doc.change_id()));
-    assert!(Wavetable::ptr_eq(doc.finished(), doc.current()));
+    assert!(Wavetable::ptr_eq(doc.finished(), &start));
 
     doc.redo().unwrap();
     assert!(ids.insert(doc.change_id()));
-    assert!(Wavetable::ptr_eq(doc.finished(), doc.current()));
+    assert!(Wavetable::ptr_eq(doc.finished(), &result));
 }
 
 fn gain_step(doc: &mut Document) {

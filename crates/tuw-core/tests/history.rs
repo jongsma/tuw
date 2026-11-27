@@ -155,8 +155,15 @@ fn undo_and_redo_refused_while_open() {
     doc.begin_step("B").unwrap();
     doc.update_step(|t| t.with_frame(0, 0, &[0.25; 8])).unwrap();
     let before = doc.current().to_tuw3();
+    let finished = doc.finished().clone();
     assert_eq!(doc.undo(), Err(DocumentError::StepOpen));
+    assert!(Wavetable::ptr_eq(doc.finished(), &finished));
+    assert_eq!(doc.undo_label(), None);
+    assert_eq!(doc.redo_label(), Some("A"));
     assert_eq!(doc.redo(), Err(DocumentError::StepOpen));
+    assert!(Wavetable::ptr_eq(doc.finished(), &finished));
+    assert_eq!(doc.undo_label(), None);
+    assert_eq!(doc.redo_label(), Some("A"));
     assert_same(&doc.current().to_tuw3(), &before);
     assert!(doc.is_step_open());
 }
@@ -186,11 +193,22 @@ fn history_limit_drops_oldest() {
         }
         assert_eq!(doc.undo(), Err(DocumentError::NothingToUndo));
         // The oldest reachable version is the one after step 2 (index 1); with limit 0 it is
-        // the only state left, which is the last step.
-        let oldest = if limit == 0 { limit + 1 } else { 1 };
-        assert_same(&doc.current().to_tuw3(), &snapshots[oldest]);
+        // also the last step, the only state left.
+        assert_same(&doc.current().to_tuw3(), &snapshots[1]);
         assert_eq!(doc.undo_label(), None);
     }
+}
+
+#[test]
+fn history_limit_usize_max() {
+    let mut doc = Document::new(table(), usize::MAX);
+    for i in 0..3 {
+        step(&mut doc, "S", (i + 1) as f32 / 10.0);
+    }
+    for _ in 0..3 {
+        doc.undo().unwrap();
+    }
+    assert_eq!(doc.undo(), Err(DocumentError::NothingToUndo));
 }
 
 #[test]

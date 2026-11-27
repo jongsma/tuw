@@ -3,18 +3,19 @@
 //! The document: a wavetable with a selection and an undo/redo history.
 //!
 //! A [`Document`] is UI-thread code: it allocates and must never be touched from an audio
-//! callback. Hand the audio side a clone of [`Document::current`] instead.
+//! callback. Hand the audio side a clone of [`Document::finished`] instead; it changes only
+//! when [`Document::change_id`] does.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{DocumentError, EditError, Selection, Wavetable};
 
-/// The history limit [`Document`] users get unless they choose another: 200 undo steps.
+/// A sensible history limit to pass to [`Document::new`]: 200 undo steps.
 pub const DEFAULT_HISTORY_LIMIT: usize = 200;
 
-/// Identifies one version of a document's content. It changes whenever the content changes
-/// (a recorded step, undo, redo) and is unique across all documents in the process.
+/// Identifies one version of a document's content. It changes whenever the finished version
+/// changes (a recorded step, undo, redo), never while a step is open, and is unique across all documents in the process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChangeId(u64);
 
@@ -274,7 +275,8 @@ impl Document {
         self.states.get(self.cursor + 1)?.label.as_deref()
     }
 
-    /// Whether the content differs from the state last marked saved. A new document is not
+    /// Whether the finished state is another one than the state last marked saved (compared by
+    /// identity, not by samples: undo then redo of the same edit still counts as modified). A new document is not
     /// modified.
     pub fn is_modified(&self) -> bool {
         self.states[self.cursor].serial != self.saved
