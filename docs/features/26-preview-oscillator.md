@@ -300,8 +300,9 @@ Module `crates/tuw-core/src/preview/` (`mod.rs` re-exports; `lib.rs` adds `pub m
 ```rust
 // levels.rs
 pub fn level_harmonics(frame_size: u32) -> Vec<u32>;
-// H_0 = frame_size / 2 - 1; H_{l+1} = floor(H_l * FRAC_1_SQRT_2) while it is < H_l and >= 1,
-// otherwise H_l - 1 while >= 1. Strictly decreasing, ends at 1. 8 -> [3, 2, 1].
+// H_0 = (frame_size - 1) / 2 (integer division: N/2 - 1 for even N, (N-1)/2 for odd N);
+// H_{l+1} = min(round(H_l / sqrt 2), floor(0.75 * H_l)), or H_l - 1 if that is not < H_l;
+// stop after 1. Strictly decreasing, ratio <= 0.75, ends at 1. 8 -> [3, 2, 1].
 pub fn level_length(harmonics: u32) -> usize;        // max(4 * harmonics, 16)
 pub struct LevelWeights { pub first: usize, pub w_first: f32, pub w_second: f32 }
 // `first` = index of the richest level whose top harmonic is below Nyquist; `second` = first + 1
@@ -320,6 +321,7 @@ impl PreparedTable {
     pub fn sample_count(&self) -> usize;   // all levels of all frames
 }
 pub struct Preparer { /* FftPlanner, cache: HashMap<usize, (Frame, Arc<PreparedFrame>)> */ }
+impl Default for Preparer { /* = new() */ }
 impl Preparer {
     pub fn new() -> Preparer;
     pub fn prepare(&mut self, table: &Wavetable) -> Result<Arc<PreparedTable>, PreviewError>;
@@ -350,9 +352,11 @@ impl Voice {
 
 // handoff.rs
 pub fn preview(sample_rate: f32, capacity: usize) -> Result<(PreviewControl, Oscillator), PreviewError>;
-pub struct PreviewControl { /* rtrb Producer<Command>, Consumer<Arc<PreparedTable>> */ }
+pub struct PreviewControl { /* Producer<Arc<PreparedTable>> (tables), Producer<Control>,
+                              Consumer<Arc<PreparedTable>> (returned tables) */ }
 impl PreviewControl {
-    pub fn set_table(&mut self, t: Arc<PreparedTable>) -> Result<(), PreviewError>; // Busy if full
+    pub fn set_table(&mut self, t: Arc<PreparedTable>) -> Result<(), Arc<PreparedTable>>;
+    // gives the table back if the table ring is full (the caller keeps or drops it on its thread)
     pub fn set_playhead(&mut self, y: f32, z: f32) -> Result<(), PreviewError>;
     pub fn set_frequency(&mut self, hz: f32) -> Result<(), PreviewError>;
     pub fn play(&mut self) -> Result<(), PreviewError>;
@@ -380,36 +384,56 @@ the cache key only.
   `first` = the smallest `l` with `on(l) > 0`; `w_first = on(first)`;
   `w_second = 1 - w_first` if `first + 1` exists, else 0 (the last level fades to silence).
   If no level is on (fundamental at or above Nyquist), both weights are 0. Because every
-  consecutive ratio `H_{l+1} / H_l` ≤ 0.7072 < `FADE_START`, `on(first + 1) = 1` whenever
-  `w_first < 1`, so the weights are continuous.
+  consecutive ratio `H_{l+1} / H_l` ≤ 0.75 < `FADE_START`, `on(first + 1) = 1` whenever
+  `w_first < 1`, so the weights are continuous. `on()` and the test `H × f < ny` are computed in
+  `f64`.
+- **When weights are computed.** Once per output sample, from that sample's smoothed frequency,
+  outside the loop over the four corners, once per table being rendered (tables of different
+  frame sizes have different level lists). The voice keeps the last weights for tests
+  (`Voice::last_weights() -> LevelWeights` of the current table).
 - **Kernel.** `h(t) = sinc(t) × kaiser(t / 8, KERNEL_BETA)` for `|t| < 8` (16 taps), tabulated
   at `KERNEL_PHASES + 1` fractional offsets when the `Voice` is made; reading a level at a
-  fractional position interpolates linearly between the two nearest phase rows and sums 16 taps
-  with circular indexing. A level whose length is below 16 still indexes circularly.
+  fractional position `x` interpolates linearly between the two nearest phase rows and sums the
+  16 taps at sample indices `floor(x) - 7 ..= floor(x) + 8`, with circular indexing. A level whose length is below 16 still indexes circularly.
 - **Rendering one sample.** Phase `φ ∈ [0, 1)` (f64), one accumulator for all frames:
-  `φ += f / fs`, wrapped. Playhead `y` clamped to `0..=y_size-1`; `y0 = floor(y)` clamped to
+  `φ += f / fs`, wrapped with `φ - φ.floor()`. **Inputs are sanitised in the setters:** a
+  frequency that is not finite or ≤ 0 means silence (both weights 0, phase held); a non-finite
+  playhead coordinate is ignored (the previous value stays). So the output is always finite. Playhead `y` clamped to `0..=y_size-1`; `y0 = floor(y)` clamped to
   `y_size - 1`, `y1 = min(y0 + 1, y_size - 1)`, `a = y - y0`; same for `z`. Output =
   Σ over the four corner frames of the bilinear weight × (`w_first` × level(first) read at
   `φ × M_first` + `w_second` × level(second) read at `φ × M_second`), times the play gain.
   The same `LevelWeights` for all four frames.
-- **Smoothing.** `set_playhead` / `set_frequency` start a linear ramp from the current value to
-  the target over `SMOOTHING_SECONDS × fs` samples; at the end the value equals the target exactly.
-  A new target mid-ramp starts a new ramp from where it is. The first `set_frequency` before any
-  `play` jumps (nothing is sounding).
+- **Smoothing.** While the voice is sounding (play gain > 0), `set_playhead` / `set_frequency`
+  start a linear ramp from the current value to the target over
+  `round(SMOOTHING_SECONDS × fs)` samples; at the end the value equals the target exactly. A new
+  target mid-ramp starts a new ramp from where it is. While the voice is silent (stopped and
+  faded out, or never played), both setters jump to the target at once.
 - **Play/stop.** A gain ramp over `PLAY_FADE_SECONDS`; `stop` ramps to 0 and then holds silence.
-- **Table swap.** With no table, `set_table` installs it (no fade). While playing with a table,
-  the new table fades in and the old fades out linearly over `SWAP_FADE_SECONDS`; afterwards the
-  old one becomes *retired* (`take_retired`). A `set_table` while a swap is running returns the
-  new table to the caller unused (`Some`), and `Oscillator` keeps that command queued (it peeks
-  and doesn't pop `SetTable` while `is_swapping()`), so swaps run one after another.
+- **Table swap.** With no table, `set_table` installs it (no fade). While silent with a table,
+  `set_table` replaces it at once and the old one becomes *retired*. While sounding, the new table
+  fades in and the old fades out linearly over `SWAP_FADE_SECONDS`; afterwards the old one becomes
+  *retired*. `take_retired` hands a retired table out. `is_swapping()` is true while a swap runs
+  **or a retired table has not been taken**; `set_table` while `is_swapping()` returns the new
+  table to the caller unused (`Some`). **The `Voice` never clones or drops an `Arc`**: it only
+  moves them, and a slot (`current`, `fading`, `retired`) is only written while it is `None`.
+- **Two rings.** `PreviewControl` sends tables on their own ring and control changes (playhead,
+  frequency, play, stop) on another, so a table waiting for a swap never holds up `stop`. The
+  `Oscillator` peeks the table ring and pops only when `!is_swapping()`; it drains the control
+  ring every `render`. Dropping the `Oscillator` frees whatever it still holds, so #27 must drop
+  it off the audio thread (documented).
 - **Disposal.** The `Oscillator` pushes every retired or replaced table into the return ring; if
   the ring is full it keeps it in one of `capacity` preallocated holding slots
   (`[Option<Arc<_>>; N]`-style, or a `Vec` with reserved capacity made in `preview()`) and retries
   at the next `render`. It never drops an `Arc<PreparedTable>`. If every slot is full it stops
   accepting `SetTable` commands until slots free up.
 - **Cache.** Keyed by `Frame::addr`; each entry also holds a clone of the source `Frame`, so its
-  address can't be reused while cached. After each `prepare` the cache holds exactly the frames
-  of that table.
+  address can't be reused while cached. After each successful `prepare` the cache holds exactly
+  the frames of that table; frames that appear several times in one table (a silent table shares
+  one buffer) are built once. A `prepare` that returns `Err` leaves the cache untouched.
+- **`sample_count`** counts every grid position's levels (a frame shared by several positions is
+  counted at each), so it bounds the worst case.
+- **`PreviewError`** implements `Display` and `std::error::Error`; `Preparer` implements
+  `Default`.
 
 ### Review focus
 
@@ -450,10 +474,10 @@ test `tests/preview_levels.rs`.
 constants, `PreviewError`.
 
 - [ ] **Step 1: Write the failing tests:**
-  - `harmonics_per_frame_size`: `level_harmonics(8) == [3, 2, 1]`; for 600, 2048 and 65 536 the
-    first is `N/2 - 1`, the list strictly decreases, ends at 1, and every consecutive ratio is
-    ≤ 0.7072.
-  - `memory_stays_under_the_cap` (AC11 part): for every frame size 8..=4096 and 65 536,
+  - `harmonics_per_frame_size`: `level_harmonics(8) == [3, 2, 1]`; for 600, 601, 2048 and
+    65 536 the first is `(N - 1) / 2`, the list strictly decreases, ends at 1, every consecutive
+    ratio is ≤ 0.75, and for `H_l ≥ 40` every ratio is ≥ 0.69 (two levels per octave).
+  - `memory_stays_under_the_cap` (AC11 part): for every frame size 8..=65 536,
     `Σ level_length(H) ≤ MAX_MEMORY_FACTOR × N`.
   - `no_level_above_nyquist` (AC2 part): for fs ∈ {44 100, 48 000, 96 000}, MIDI notes 0..=127,
     1000 random frequencies in (0, 2 × fs) and frequencies exactly at Nyquist and at each
@@ -474,10 +498,11 @@ constants, `PreviewError`.
 **Files:** `preview/prepare.rs`, `table.rs`; test `tests/preview_prepare.rs`.
 
 **Interfaces:** consumes Task 1. Produces `PreparedFrame`, `PreparedTable`, `Preparer::{new,
-prepare}` (reuse is Task 3: in this task every frame is built), `Frame::addr`.
+prepare}`, `Frame::addr`. In this task frames are deduplicated within one `prepare` (by
+`Frame::addr`); reuse across prepares is Task 3.
 
 - [ ] **Step 1: Write the failing tests:**
-  - `levels_are_band_limited` (AC1): proptest over random frames (sizes 8, 600, 2048; samples
+  - `levels_are_band_limited` (AC1): proptest over random frames (sizes 8, 600, 601, 2048; samples
     from `finite_f32` scaled into [-1, 1]): for each level, FFT of length `M_l`: every bin above
     `H_l` (up to `M_l / 2`), and bin 0, has magnitude ≤ 1e-4 × (largest bin of the level) +
     1e-6 (f32 FFT round-off on lengths ≤ 2¹⁶; justify in a comment).
@@ -486,15 +511,15 @@ prepare}` (reuse is Task 3: in this task every frame is built), `Frame::addr`.
     (relative error 1e-4), and lower levels keep only the harmonics ≤ `H_l`.
   - `preparing_changes_nothing` (AC6 part): deep snapshot (`to_tuw3`) before and after
     `prepare` are `assert_same`.
-  - `size_limit` (AC11): a table of exactly 2²⁴ samples (8 × 2048 × 1024, silent) prepares;
-    8 × 2049 × 1024 … use `Wavetable::silent(8, 2048, 1025)` → `Err(Unsupported { samples,
-    limit: 1 << 24 })`; frame size 65 536 × 1 × 1 prepares and its `sample_count() ≤ 8 × 65 536`.
+  - `size_limit` (AC11): `Wavetable::silent(8, 2048, 1025)` (more than 2²⁴ samples) →
+    `Err(Unsupported { samples, limit: 1 << 24 })` and the cache is untouched; frame size
+    65 536 × 1 × 1 prepares and its `sample_count() ≤ 8 × 65 536`. A silent table of exactly 2²⁴
+    samples (`silent(8, 2048, 1024)`, all frames one buffer) prepares, building one frame; check
+    "unchanged" by every sample's bits being 0, not by a deep snapshot (the #24 gotcha).
   - `frame_size_8` (review focus 5): prepares with levels `[3, 2, 1]`, `sample_count() == 48`.
 - [ ] **Step 2: Run** `cargo test --workspace`: fails.
 - [ ] **Step 3: Implement** per *Semantics* (one `FftPlanner<f32>` kept in the `Preparer`).
-- [ ] **Step 4: Run** the gate: pass (the 2²⁴ test: building 2 048 × 1 024 silent frames of 8 is
-  fine; if it takes more than a few seconds in debug, mark only that test `#[ignore]` with a
-  reason and run it in the verification step with `--ignored`; record a ruling).
+- [ ] **Step 4: Run** the gate: pass.
 - [ ] **Step 5: Commit** `feat(tuw-core): prepare band-limited levels for the preview (#26)`.
 
 ### Task 3: reusing unchanged frames
@@ -521,12 +546,17 @@ yet: `set_playhead`/`set_frequency` set values directly in this task); tests
 **Interfaces:** consumes Tasks 1–3. Produces `Voice::{new, set_table, set_playhead,
 set_frequency, play, stop, render}` at fixed values.
 
-- [ ] **Step 1: Write the failing tests:**
+- [ ] **Step 1: Write the failing tests** (set every control *before* `play`, so nothing ramps):
   - `no_aliasing_rendered` (AC2): naive saw frame (`N = 2048`, sample i = 2i/N − 1), one frame;
-    fs ∈ {44 100, 48 000, 96 000}; notes MIDI 24, 48, 69, 96, 108, 120 and, per fs, one frequency
+    fs ∈ {44 100, 48 000, 96 000}; notes MIDI 48, 69, 96, 108, 120 and, per fs, one frequency
     inside a crossfade (`(1 + FADE_START) / 2 × ny / H_l` for some mid level): render 1 024 warm-up
     samples, then 2¹⁵; largest non-harmonic bin ≤ −80 dB relative to the fundamental's bin
-    (`spectrum.rs` helper; Blackman–Harris sidelobes are −92 dB, below the bound).
+    (`spectrum.rs` helper). The helper asserts that harmonics are at least 16 bins apart and that
+    more than 0 bins were examined (otherwise the test is vacuous). Summed Blackman–Harris leakage
+    of many 1/k harmonics is about −88 to −90 dB, below the bound.
+  - `analysis_catches_aliasing` (positive control): the same helper on a deliberately aliased
+    signal (the naive saw frame read with plain linear interpolation at MIDI 108, computed in the
+    test) reports more than −80 dB.
   - `bilinear_on_a_frame` (AC4): 3 × 2 table with distinct frames; playhead exactly on (2, 1)
     (last frame of both axes) renders, sample for sample within 1e-6, the same as a 1 × 1 table of
     that frame alone at the same note.
@@ -534,13 +564,16 @@ set_frequency, play, stop, render}` at fixed values.
     bilinear mix of the four single-frame renders (within 1e-5: f32 summation order).
   - `one_by_one_and_fractional` (AC4, review focus 2): `y_size = 1` with y = 0.7, `z_size = 1`,
     and both: renders the only frames, finite, no panic.
-  - `one_level_choice` (AC5): four frames with different spectra at a crossfade note: each
-    corner's contribution equals that frame rendered alone with the same `LevelWeights` (check by
-    rendering the 2 × 2 at each exact corner and comparing to the single-frame render).
-  - `dc_removed` (AC6): a frame of 0.5 + sine: mean of 2¹⁴ rendered samples over whole cycles
-    ≤ 1e-4.
+  - `one_level_choice` (AC5): on a 2 × 2 table at a crossfade note and a playhead between all four
+    frames, after every rendered sample `Voice::last_weights()` equals
+    `level_weights(levels, f, fs)` (the weights are computed once per sample, outside the corner
+    loop, per *Semantics*).
+  - `dc_removed` (AC6): a frame of 0.5 + sine, at a note `f = fs × k / 2¹⁴` (whole cycles in 2¹⁴
+    samples, so no sine leakage): the mean of 2¹⁴ rendered samples ≤ 1e-4.
   - `edge_notes` (AC12): f = ny and 1.5 × ny render all zeros; f = 0.5 Hz and MIDI 0 render finite
-    output using level 0 (`level_weights(..).first == 0`); frame size 8 renders finite output.
+    output using level 0 (`level_weights(..).first == 0`); frame size 8 renders finite output;
+    `set_frequency` with NaN, ±∞, 0 and −440 renders silence and finite output; `set_playhead` with
+    NaN or ∞ keeps the previous playhead.
 - [ ] **Step 2: Run:** fails. **Step 3: Implement** the kernel and the render loop per
   *Semantics*. **Step 4: Run** the gate. **Step 5: Commit**
   `feat(tuw-core): render the preview with bilinear morph (#26)`.
@@ -555,14 +588,20 @@ set_frequency, play, stop, render}` at fixed values.
     `Voice::frequency()`, documented, `pub`) after each sample moves by at most
     `target_delta / (SMOOTHING_SECONDS × fs) + 1e-6` and equals the target exactly (`to_bits`)
     once the ramp's samples have passed.
-  - `no_click_on_swap` (AC9, review focus 3): playing table A (saw), swap to B (inverted saw, a
-    3 × 1 grid while the playhead is at y = 2 on A's 4 × 1 grid... clamp): the largest
-    sample-to-sample step during and after the swap ≤ 1.5 × the largest step of steady A or B
-    playback at that note.
-  - `no_click_on_play_stop` (AC9): the first and last samples around `play` and `stop` ramp: no
-    step larger than 1.5 × steady playback's largest step; after the fade, exact zeros.
-  - `swap_queue` : `set_table` during a swap returns the table unused; `take_retired` yields the
-    old table once the swap is done.
+  - `no_click_on_swap` (AC9, review focus 3): sines at a low note (110 Hz), where the steady
+    largest step is about `2π f / fs`: playing A (a 4 × 1 grid of sines, playhead at y = 3), swap
+    to B (a 2 × 1 grid of inverted sines, so the playhead clamps to y = 1): the largest
+    sample-to-sample step during and after the swap ≤ 1.5 × the steady largest step. Control: the
+    same swap with the fade disabled (a test-only constructor `Voice::with_fades(fs, 0.0, …)` or
+    equivalent) exceeds the bound.
+  - `no_click_on_play_stop` (AC9): sine at 110 Hz; around `play` and `stop` no step is larger than
+    1.5 × the steady largest step; after the stop fade, exact zeros (bits). Same control without
+    the fade.
+  - `swap_queue`: `set_table` during a swap, and while a retired table has not been taken,
+    returns the table unused; `take_retired` yields the old table once the swap is done; while
+    silent, `set_table` replaces at once and retires the old one.
+  - `ramps_only_while_sounding` (AC8): while stopped, `set_playhead` / `set_frequency` jump
+    (accessor equals the target at once).
 - [ ] **Step 2–5:** run (fails), implement per *Semantics*, run the gate, commit
   `feat(tuw-core): smooth the preview and fade table swaps (#26)`.
 
@@ -571,15 +610,20 @@ set_frequency, play, stop, render}` at fixed values.
 **Files:** `preview/handoff.rs`; test `tests/preview_realtime.rs` (own binary).
 
 - [ ] **Step 1: Write the failing tests:**
-  - `render_allocates_nothing` (AC10, review focus 4): a counting `#[global_allocator]` that
-    counts allocations and deallocations only while a `const`-initialised thread-local flag is
-    set; on a spawned "audio" thread, set the flag only around `Oscillator::render` calls. The UI
+  - `render_allocates_nothing` (AC10, review focus 4): a counting `#[global_allocator]`
+    (`unsafe impl GlobalAlloc` is allowed here: the test is its own crate; Rust 2024 needs
+    explicit `unsafe {}` blocks inside its methods) that counts allocations and deallocations only
+    while a `const`-initialised thread-local flag is set; single-threaded and deterministic: set
+    the flag only around `Oscillator::render` calls. The UI
     thread prepares A, sends it, plays, the audio thread renders; the UI prepares B (one frame
     changed, so B shares frames with A), sends it, **drops every `Arc` it holds to A and B and
     clears the `Preparer`**, then the audio thread renders through the whole swap; then the UI
-    calls `collect()` until A comes back. Assert zero allocations and deallocations inside
-    `render`, and that `collect()` returned ≥ 1.
-  - `busy_when_full`: with `capacity` 2, a third command without rendering returns `Busy`.
+    calls `collect()` until A comes back. Also: the return ring full (don't `collect`, swap more
+    tables than the ring holds) so tables go to the holding slots, and a replace while stopped.
+    Assert zero allocations and deallocations inside `render` in all of these, and that
+    `collect()` eventually returns every table.
+  - `busy_when_full`: with `capacity` 2, a third control without rendering returns `Busy`; a third
+    table is given back by `set_table`; `stop` still arrives while a table waits.
   - `controls_arrive`: `set_frequency`, `set_playhead`, `play`, `stop` sent through
     `PreviewControl` change the rendered output as the `Voice` tests expect (one smoke check).
 - [ ] **Step 2–5:** run (fails), implement per *Semantics*, run the gate, commit
