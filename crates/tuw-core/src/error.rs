@@ -103,3 +103,46 @@ impl std::error::Error for EditError {
         }
     }
 }
+
+/// Why an operation on a [`Document`](crate::Document) was refused. A refused operation
+/// changes nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DocumentError {
+    /// Undo, redo, begin or apply while a step is open.
+    StepOpen,
+    /// Update, finish or cancel with no open step.
+    NoOpenStep,
+    /// There is no earlier state to go back to.
+    NothingToUndo,
+    /// There is no later state to go forward to.
+    NothingToRedo,
+    /// An update's edit was refused.
+    Edit(EditError),
+}
+
+impl fmt::Display for DocumentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DocumentError::StepOpen => f.write_str("a step is open"),
+            DocumentError::NoOpenStep => f.write_str("no step is open"),
+            DocumentError::NothingToUndo => f.write_str("nothing to undo"),
+            DocumentError::NothingToRedo => f.write_str("nothing to redo"),
+            DocumentError::Edit(e) => write!(f, "the edit was refused: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for DocumentError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            DocumentError::Edit(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<EditError> for DocumentError {
+    fn from(e: EditError) -> Self {
+        DocumentError::Edit(e)
+    }
+}

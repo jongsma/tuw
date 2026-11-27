@@ -40,11 +40,13 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod document;
 mod error;
 mod selection;
 mod table;
 
-pub use error::{Axis, EditError};
+pub use document::{ChangeId, DEFAULT_HISTORY_LIMIT, Document};
+pub use error::{Axis, DocumentError, EditError};
 pub use selection::Selection;
 pub use table::{Frame, Wavetable};
 pub use tuw3;

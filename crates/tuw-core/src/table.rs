@@ -188,6 +188,21 @@ impl Wavetable {
         Ok(result)
     }
 
+    /// Whether `a` and `b` are the same version: same sizes, the same metadata allocation and
+    /// every frame the same buffer. Equal contents are not enough; a clone is `ptr_eq` to
+    /// its original, a separately built table is not.
+    pub fn ptr_eq(a: &Wavetable, b: &Wavetable) -> bool {
+        a.frame_size == b.frame_size
+            && a.y_size == b.y_size
+            && a.z_size == b.z_size
+            && Arc::ptr_eq(&a.metadata, &b.metadata)
+            && a.frames.len() == b.frames.len()
+            && a.frames
+                .iter()
+                .zip(&b.frames)
+                .all(|(x, y)| Frame::ptr_eq(x, y))
+    }
+
     /// The number of frames along `axis`.
     fn axis_size(&self, axis: Axis) -> u32 {
         match axis {
