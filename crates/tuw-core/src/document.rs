@@ -180,6 +180,10 @@ impl Document {
             serial: self.next_serial,
         });
         self.next_serial += 1;
+        // `states.len() - 1 > limit`, never `len > limit + 1`: the limit may be `usize::MAX`.
+        while self.states.len() - 1 > self.history_limit {
+            self.states.pop_front();
+        }
         self.cursor = self.states.len() - 1;
         self.change_id = ChangeId::fresh();
         Ok(())
@@ -214,6 +218,42 @@ impl Document {
             return Err(e);
         }
         self.finish_step()
+    }
+
+    /// Moves back one state, if there is one, and takes a fresh [`ChangeId`].
+    ///
+    /// # Errors
+    ///
+    /// [`DocumentError::StepOpen`] while a step is open; [`DocumentError::NothingToUndo`] on the
+    /// oldest state left.
+    pub fn undo(&mut self) -> Result<(), DocumentError> {
+        if self.open.is_some() {
+            return Err(DocumentError::StepOpen);
+        }
+        if self.cursor == 0 {
+            return Err(DocumentError::NothingToUndo);
+        }
+        self.cursor -= 1;
+        self.change_id = ChangeId::fresh();
+        Ok(())
+    }
+
+    /// Moves forward one state, if there is one, and takes a fresh [`ChangeId`].
+    ///
+    /// # Errors
+    ///
+    /// [`DocumentError::StepOpen`] while a step is open; [`DocumentError::NothingToRedo`] on the
+    /// newest state.
+    pub fn redo(&mut self) -> Result<(), DocumentError> {
+        if self.open.is_some() {
+            return Err(DocumentError::StepOpen);
+        }
+        if self.cursor + 1 >= self.states.len() {
+            return Err(DocumentError::NothingToRedo);
+        }
+        self.cursor += 1;
+        self.change_id = ChangeId::fresh();
+        Ok(())
     }
 
     /// The label of the step `undo` would revert, if there is one.
