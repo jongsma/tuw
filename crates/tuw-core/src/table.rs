@@ -143,7 +143,7 @@ impl Wavetable {
     }
 
     /// Checks one replacement frame and builds it: position, then length, then finiteness.
-    fn checked_frame(&self, y: u32, z: u32, samples: Vec<f32>) -> Result<Frame, EditError> {
+    fn checked_frame(&self, y: u32, z: u32, samples: &[f32]) -> Result<Frame, EditError> {
         if y >= self.y_size || z >= self.z_size {
             return Err(EditError::OutsideGrid { y, z });
         }
@@ -160,13 +160,14 @@ impl Wavetable {
     }
 
     /// A new table with the frame at (`y`, `z`) replaced; every other frame is shared.
+    /// The samples are copied into the new frame.
     ///
     /// # Errors
     ///
     /// [`EditError::OutsideGrid`], [`EditError::FrameLength`] or [`EditError::NonFiniteSample`]
     /// (the first bad sample), checked in that order. Nothing changes on error.
-    pub fn with_frame(&self, y: u32, z: u32, samples: Vec<f32>) -> Result<Wavetable, EditError> {
-        self.with_frames(vec![(y, z, samples)])
+    pub fn with_frame(&self, y: u32, z: u32, samples: &[f32]) -> Result<Wavetable, EditError> {
+        self.with_frames(&[(y, z, samples)])
     }
 
     /// A new table with several frames replaced at once. All entries are checked before
@@ -175,10 +176,10 @@ impl Wavetable {
     /// # Errors
     ///
     /// As for [`with_frame`](Wavetable::with_frame), for the first bad entry.
-    pub fn with_frames(&self, frames: Vec<(u32, u32, Vec<f32>)>) -> Result<Wavetable, EditError> {
+    pub fn with_frames(&self, frames: &[(u32, u32, &[f32])]) -> Result<Wavetable, EditError> {
         let checked = frames
-            .into_iter()
-            .map(|(y, z, samples)| Ok((y, z, self.checked_frame(y, z, samples)?)))
+            .iter()
+            .map(|&(y, z, samples)| Ok((y, z, self.checked_frame(y, z, samples)?)))
             .collect::<Result<Vec<_>, EditError>>()?;
         let mut result = self.clone();
         for (y, z, frame) in checked {

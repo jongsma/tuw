@@ -359,8 +359,8 @@ and shows only the sizes. No `PartialEq` (it would compare floats).
 
 ```rust
 impl Wavetable {
-    pub fn with_frame(&self, y: u32, z: u32, samples: Vec<f32>) -> Result<Wavetable, EditError>;
-    pub fn with_frames(&self, frames: Vec<(u32, u32, Vec<f32>)>) -> Result<Wavetable, EditError>;
+    pub fn with_frame(&self, y: u32, z: u32, samples: &[f32]) -> Result<Wavetable, EditError>;
+    pub fn with_frames(&self, frames: &[(u32, u32, &[f32])]) -> Result<Wavetable, EditError>;
     pub fn with_metadata(&self, metadata: tuw3::Metadata) -> Result<Wavetable, EditError>;
 }
 ```
@@ -521,5 +521,6 @@ Constructors return `IndexOutOfRange` or `OutsideGrid` for positions outside the
   `main` before building; the plan review added overflow and selection-model tests; the one
   refusal test on a 2²⁸-sample table checks sizes instead of a 1 GiB deep snapshot, because
   versions cannot change (edits take `&self`).
-- Open for later: `with_frame` / `with_frames` take `Vec<f32>`; a slice would spare callers a copy.
-  Worth deciding before #31 adds callers.
+- After the final review, `with_frame` / `with_frames` take `&[f32]` instead of the planned `Vec<f32>`
+  (maintainer's call on PR #43): turning a `Vec` into the stored `Arc<[f32]>` copies anyway, so a
+  slice is never dearer and spares callers holding a borrowed frame a second copy.

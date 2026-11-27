@@ -15,7 +15,7 @@ fn fixture() -> Wavetable {
     for z in 0..3 {
         for y in 0..4 {
             let v = (z * 10 + y + 1) as f32;
-            t = t.with_frame(y, z, vec![v; 8]).unwrap();
+            t = t.with_frame(y, z, &[v; 8]).unwrap();
         }
     }
     t
@@ -205,7 +205,7 @@ fn many_small_frames_work() {
     let t = Wavetable::silent(8, 4_096, 16).unwrap();
     // -0.0 and a subnormal must survive the round trip bit for bit.
     let samples = vec![-0.0, f32::from_bits(1), 1.0, -2.5, 0.25, 0.0, 3.0, -1.0];
-    let t = t.with_frame(4_095, 15, samples.clone()).unwrap();
+    let t = t.with_frame(4_095, 15, &samples).unwrap();
     let back = Wavetable::from(t.to_tuw3());
     let bits = |f: &Frame| f.samples().iter().map(|s| s.to_bits()).collect::<Vec<_>>();
     let expected: Vec<u32> = samples.iter().map(|s| s.to_bits()).collect();

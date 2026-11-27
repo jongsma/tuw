@@ -29,7 +29,7 @@ proptest! {
         let (y, z) = (a.y_size() - 1, a.z_size() - 1);
         let new: Vec<f32> = new.into_iter().take(a.frame_size() as usize).chain(std::iter::repeat(0.0)).take(a.frame_size() as usize).collect();
         let before = a.to_tuw3();
-        let b = a.with_frame(y, z, new.clone()).unwrap();
+        let b = a.with_frame(y, z, &new).unwrap();
         assert_same(&a.to_tuw3(), &before);
         prop_assert_eq!(bits(b.frame(y, z).unwrap().samples()), bits(&new));
         for (fy, fz, frame) in a.frames() {
@@ -44,7 +44,7 @@ fn replacing_one_frame_shares_the_others_fixed() {
     let a = random_table();
     let before = a.to_tuw3();
     let new = vec![0.25f32; 8];
-    let b = a.with_frame(1, 1, new.clone()).unwrap();
+    let b = a.with_frame(1, 1, &new).unwrap();
     assert_same(&a.to_tuw3(), &before);
     assert_eq!(bits(b.frame(1, 1).unwrap().samples()), bits(&new));
     for z in 0..2 {
@@ -63,13 +63,13 @@ fn invalid_frames_are_refused_and_change_nothing() {
         let mut s = vec![0.0f32; 8];
         s[3] = bad;
         assert_eq!(
-            a.with_frame(0, 0, s).unwrap_err(),
+            a.with_frame(0, 0, &s).unwrap_err(),
             EditError::NonFiniteSample { y: 0, z: 0, x: 3 }
         );
         assert_same(&a.to_tuw3(), &before);
     }
     assert_eq!(
-        a.with_frame(0, 0, vec![0.0; 7]).unwrap_err(),
+        a.with_frame(0, 0, &[0.0; 7]).unwrap_err(),
         EditError::FrameLength {
             expected: 8,
             actual: 7
@@ -77,11 +77,11 @@ fn invalid_frames_are_refused_and_change_nothing() {
     );
     assert_same(&a.to_tuw3(), &before);
     assert_eq!(
-        a.with_frame(3, 0, vec![0.0; 8]).unwrap_err(),
+        a.with_frame(3, 0, &[0.0; 8]).unwrap_err(),
         EditError::OutsideGrid { y: 3, z: 0 }
     );
     assert_eq!(
-        a.with_frame(0, 2, vec![0.0; 8]).unwrap_err(),
+        a.with_frame(0, 2, &[0.0; 8]).unwrap_err(),
         EditError::OutsideGrid { y: 0, z: 2 }
     );
     assert_same(&a.to_tuw3(), &before);
@@ -93,11 +93,11 @@ fn a_failed_batch_changes_nothing() {
     let before = a.to_tuw3();
     let mut bad = vec![0.0f32; 8];
     bad[0] = f32::NAN;
-    let result = a.with_frames(vec![
-        (0, 0, vec![1.0; 8]),
-        (1, 0, vec![1.0; 8]),
-        (2, 0, vec![1.0; 8]),
-        (0, 1, bad),
+    let result = a.with_frames(&[
+        (0, 0, &[1.0; 8][..]),
+        (1, 0, &[1.0; 8]),
+        (2, 0, &[1.0; 8]),
+        (0, 1, &bad),
     ]);
     assert_eq!(
         result.unwrap_err(),
@@ -110,7 +110,7 @@ fn a_failed_batch_changes_nothing() {
 fn duplicate_positions_in_a_batch_last_wins() {
     let a = random_table();
     let b = a
-        .with_frames(vec![(0, 0, vec![1.0; 8]), (0, 0, vec![2.0; 8])])
+        .with_frames(&[(0, 0, &[1.0; 8][..]), (0, 0, &[2.0; 8])])
         .unwrap();
     assert_eq!(bits(b.frame(0, 0).unwrap().samples()), bits(&[2.0; 8]));
 }
