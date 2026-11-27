@@ -346,15 +346,23 @@ Semantics the signatures don't show:
 - **`finish_step`:** if the open step's result is `ptr_eq` to its starting version (no
   successful update, or an update that returned the start), it records nothing and leaves the
   change id alone. Otherwise it drops the states after the cursor (redo steps), pushes the new
-  state, drops the oldest state while there are more than `n + 1`, and takes a fresh change id.
+  state, drops the oldest state while `states.len() - 1 > n` (never `n + 1`: `n` may be
+  `usize::MAX`), and takes a fresh change id.
 - **`apply`:** refuses with `StepOpen` while a step is open; otherwise runs one update and
   finishes. If the update fails, the step is cancelled, so nothing changes and nothing is
   recorded, and the error is returned.
-- **Saved marker:** `mark_saved` stores the serial of the state under the cursor;
+- **Labels:** `undo_label` is `None` when the cursor is on the oldest state left, otherwise the
+  label of the state under the cursor; `redo_label` is the label of the state after the cursor,
+  or `None`. (After the limit drops states, the oldest state left still carries a label; it must
+  not be shown, since `undo()` refuses.)
+- **Saved marker:** a plain `u64`. `mark_saved` stores the serial of the state under the cursor;
   `is_modified` is `serial(cursor) != saved`. Serials are never reused, so a saved state dropped
   by the limit leaves the document modified until the next `mark_saved`.
 - **Selection:** after every change to `current()` (a successful update, cancel, finish, undo,
-  redo) the stored selection becomes `selection.fit(current())`.
+  redo) the stored selection becomes `selection.fit(current())`. Added in Task 4 only, so its
+  property test is seen failing first; Tasks 2 and 3 don't touch the selection.
+- **Starting selection:** `Selection::all`; a caller that wants another calls `set_selection`
+  right after `new` (said in `new`'s doc comment).
 
 ### Review focus
 
@@ -404,8 +412,8 @@ set_selection, history_limit, is_step_open, undo_label, redo_label, is_modified}
   - `set_selection_fits` (AC10): on a 3 × 2 table, setting `Selection::all` of a 5 × 5 table
     stores `Selection::all` of the 3 × 2 table; setting `Selection::frame(&t, 1, 1)` keeps it.
 - [ ] **Step 2: Run** `cargo test --workspace`: fails to compile (no `Document`).
-- [ ] **Step 3: Implement** the interfaces of this task. One state, cursor 0, serial 0 and
-  `saved = Some(0)`; the change id from a `static NEXT_ID: AtomicU64` (`fetch_add(1, Relaxed)`).
+- [ ] **Step 3: Implement** the interfaces of this task, plus `impl From<EditError> for
+  DocumentError` (into `Edit`). One state, cursor 0, serial 0 and `saved = 0`; the change id from a `static NEXT_ID: AtomicU64` (`fetch_add(1, Relaxed)`).
 - [ ] **Step 4: Run** `cargo test --workspace`: passes.
 - [ ] **Step 5: Commit** `feat(tuw-core): add the document skeleton (#25)`.
 
@@ -427,11 +435,13 @@ in *Semantics*; the limit itself is Task 3).
     `!is_step_open()`, and `finished()` and `current()` are both `ptr_eq` to the 50th update's
     result (keep a clone of `current()` after it). The single-undo half of AC3 is in Task 3.
   - `cancel_restores_the_start` (AC4): after updates, `cancel_step()` makes `current()` `ptr_eq` to
-    the starting table; `undo_label()` stays `None`; `change_id()` unchanged.
+    the starting table; `finished()` is `ptr_eq` to it too; `undo_label()` stays `None`;
+    `change_id()` unchanged; `!is_modified()`.
   - `empty_and_no_op_steps_record_nothing` (AC4): begin + finish; begin + an update returning
     `Ok(s.clone())` + finish: both leave `undo_label() == None`, `change_id()` unchanged,
-    `!is_modified()`.
-  - `failed_update_keeps_the_step_open` (AC5, review focus 1): good update (gain 2), a failing one
+    `finished()` `ptr_eq` to the start, `!is_modified()`.
+  - `failed_update_keeps_the_step_open` (AC5, review focus 1): a failing *first* update leaves
+    `current()` `ptr_eq` to the start with the step open; then a good update (gain 2), a failing one
     (a NaN sample) returns `Err(DocumentError::Edit(EditError::NonFiniteSample { .. }))`, then
     `current()` is still the gain-2 result and `is_step_open()`; a following good update's
     closure still receives the starting table (`ptr_eq`); finishing records one step.
@@ -456,21 +466,24 @@ in *Semantics*; the limit itself is Task 3).
   - `undo_and_redo_match_a_reference` (AC1): proptest over a `tuw3_table(3)` and 1–40 operations
     drawn from: replace frame `(y % y_size, z % z_size)` with random finite samples; insert 1–2
     rows or columns at `at % (size + 1)`; remove one row or column at `at % size` (skipped when
-    the axis has one frame); set `metadata.name`; undo; redo. The reference model is a
-    `Vec<tuw3::Table>` of deep snapshots plus a cursor, with linear history and no limit
-    (document limit `usize::MAX`). After each operation, `assert_same(&doc.current().to_tuw3(),
+    the axis has one frame); set `metadata.name`; undo; redo. Every edit goes through `apply`
+    and always makes a new version (new samples, a new metadata allocation), so the reference
+    can push on every edit. The reference model is a `Vec<tuw3::Table>` of deep snapshots plus a
+    cursor, with linear history; the document uses `DEFAULT_HISTORY_LIMIT` (200 > 40 operations,
+    so nothing is dropped). After each operation, `assert_same(&doc.current().to_tuw3(),
     &reference[cursor])`; an undo or redo the reference can't do must return `NothingToUndo` /
     `NothingToRedo` and change nothing.
   - `a_gesture_undoes_in_one` (AC3): 50 updates, finish, one `undo()` gives `current()` `ptr_eq`
-    to the start; one `redo()` gives the finished result back (`ptr_eq`); a second `undo()` then
-    `undo()` again returns `NothingToUndo` on the second.
+    to the start; one `redo()` gives the finished result back (`ptr_eq`); after that redo, one
+    `undo()` succeeds and the next returns `NothingToUndo`.
   - `undo_and_redo_refused_while_open` (AC6): with a step open, `undo()` and `redo()` return
     `StepOpen` and `current()` is unchanged.
   - `a_new_step_drops_redo` (AC7): steps A, B, undo, step C: `redo()` returns `NothingToRedo`,
     `undo_label() == Some("C")`.
   - `history_limit_drops_oldest` (AC8, review focus 2): for limits 0, 1 and 3, finish `limit + 2`
     steps; exactly `limit` undos succeed and the next returns `NothingToUndo`; the oldest
-    reachable version is the one after step 3 (deep snapshot taken when it was made).
+    reachable version is the one after step 2 (deep snapshot taken when it was made; for limit 0
+    it is the only state left), and then `undo_label() == None`.
   - `labels_follow_the_cursor` (AC9): steps "A", "B": undo label "B", redo `None`; after undo:
     undo "A", redo "B"; after another undo: undo `None`, redo "A".
   - `failed_apply_keeps_redo` (AC5, review focus 3): steps A, B, undo, failing `apply`: `redo()`
@@ -509,7 +522,8 @@ case) and selection fitting on every change of `current()`.
   - `saved_state_is_by_serial` (review focus 5): step A, `mark_saved`, undo, step B: modified
     (B is not A); undo: modified (the state before A was never saved); redo: modified (B again,
     and A can't be reached any more).
-- [ ] **Step 2: Run** `cargo test --workspace`: the new tests fail.
+- [ ] **Step 2: Run** `cargo test --workspace`: the new tests fail. First give `mark_saved` an
+  empty body so the file compiles, and check that `selection_always_fits` itself fails.
 - [ ] **Step 3: Implement** the saved marker and the fit after every change of `current()`.
 - [ ] **Step 4: Run** `cargo test --workspace`: passes.
 - [ ] **Step 5: Commit** `feat(tuw-core): fit the selection and track unsaved changes (#25)`.
@@ -522,7 +536,8 @@ case) and selection fitting on every change of `current()`.
   (begin, update from the start, finish or cancel; `apply` for one-shot edits), snapshot undo,
   the finished version and change id for the preview, and that the document is UI-thread code.
   Add a doctest: a document on a silent table, a gesture of two gain updates, finish, undo, with
-  `ptr_eq` assertions (no float `==`).
+  `ptr_eq` assertions (no float `==`); it returns `Result<(), Box<dyn std::error::Error>>`
+  because it uses both `EditError` and `DocumentError`.
 - [ ] **Step 2: Run** the four `AGENTS.md` commands: all pass, no `missing_docs` warning.
 - [ ] **Step 3: Commit** `docs(tuw-core): describe the edit model in the crate docs (#25)`.
 
