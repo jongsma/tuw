@@ -98,6 +98,7 @@
 
 mod document;
 mod error;
+pub mod preview;
 mod selection;
 mod table;
 
