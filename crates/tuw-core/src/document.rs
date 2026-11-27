@@ -8,7 +8,7 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::{Selection, Wavetable};
+use crate::{DocumentError, EditError, Selection, Wavetable};
 
 /// The history limit [`Document`] users get unless they choose another: 200 undo steps.
 pub const DEFAULT_HISTORY_LIMIT: usize = 200;
@@ -35,6 +35,13 @@ struct State {
     serial: u64,
 }
 
+/// A step that has begun and not yet finished or cancelled.
+struct OpenStep {
+    label: String,
+    /// The result of the last successful update; the starting version until there is one.
+    result: Wavetable,
+}
+
 /// A wavetable being edited: the current version, a selection and the history of versions.
 ///
 /// This is UI-thread code (it allocates); nothing in it is reachable from an audio callback.
@@ -48,6 +55,9 @@ pub struct Document {
     selection: Selection,
     /// Serial of the state last saved.
     saved: u64,
+    /// The serial the next recorded state gets.
+    next_serial: u64,
+    open: Option<OpenStep>,
 }
 
 impl Document {
@@ -69,13 +79,18 @@ impl Document {
             change_id: ChangeId::fresh(),
             selection,
             saved: 0,
+            next_serial: 1,
+            open: None,
         }
     }
 
     /// The version to show and edit: the open step's result if there is one, else the finished
     /// version.
     pub fn current(&self) -> &Wavetable {
-        self.finished()
+        match &self.open {
+            Some(step) => &step.result,
+            None => self.finished(),
+        }
     }
 
     /// The finished version: the state under the history cursor.
@@ -107,7 +122,98 @@ impl Document {
 
     /// Whether a step is open (see the step methods).
     pub fn is_step_open(&self) -> bool {
-        false
+        self.open.is_some()
+    }
+
+    /// Opens a step called `label`. Until it is finished or cancelled, [`update_step`] replaces
+    /// [`current`](Self::current) while [`finished`](Self::finished) stays as it was. The step
+    /// starts from the finished version.
+    ///
+    /// [`update_step`]: Self::update_step
+    ///
+    /// # Errors
+    ///
+    /// [`DocumentError::StepOpen`] when a step is already open.
+    pub fn begin_step(&mut self, label: impl Into<String>) -> Result<(), DocumentError> {
+        if self.open.is_some() {
+            return Err(DocumentError::StepOpen);
+        }
+        self.open = Some(OpenStep {
+            label: label.into(),
+            result: self.finished().clone(),
+        });
+        Ok(())
+    }
+
+    /// Runs `edit` on the step's *starting* version (not on the previous update's result, so a
+    /// drag can be recomputed from where it began) and makes its result the current version.
+    ///
+    /// # Errors
+    ///
+    /// [`DocumentError::NoOpenStep`] when no step is open; [`DocumentError::Edit`] when `edit`
+    /// refuses. In both cases the document is unchanged and an open step stays open.
+    pub fn update_step<F>(&mut self, edit: F) -> Result<(), DocumentError>
+    where
+        F: FnOnce(&Wavetable) -> Result<Wavetable, EditError>,
+    {
+        let step = self.open.as_mut().ok_or(DocumentError::NoOpenStep)?;
+        step.result = edit(&self.states[self.cursor].version)?;
+        Ok(())
+    }
+
+    /// Ends the open step. If it changed the table, records one state labelled with the step's
+    /// label, drops the redo states and takes a fresh [`ChangeId`]; if it did not (no update, or
+    /// an update that returned the start), records nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`DocumentError::NoOpenStep`] when no step is open.
+    pub fn finish_step(&mut self) -> Result<(), DocumentError> {
+        let step = self.open.take().ok_or(DocumentError::NoOpenStep)?;
+        if Wavetable::ptr_eq(&step.result, self.finished()) {
+            return Ok(());
+        }
+        self.states.truncate(self.cursor + 1);
+        self.states.push_back(State {
+            version: step.result,
+            label: Some(step.label),
+            serial: self.next_serial,
+        });
+        self.next_serial += 1;
+        self.cursor = self.states.len() - 1;
+        self.change_id = ChangeId::fresh();
+        Ok(())
+    }
+
+    /// Throws the open step away: [`current`](Self::current) is the finished version again.
+    ///
+    /// # Errors
+    ///
+    /// [`DocumentError::NoOpenStep`] when no step is open.
+    pub fn cancel_step(&mut self) -> Result<(), DocumentError> {
+        self.open
+            .take()
+            .map(|_| ())
+            .ok_or(DocumentError::NoOpenStep)
+    }
+
+    /// A whole step in one call: begin, one update, finish. If `edit` refuses, nothing changes
+    /// and nothing is recorded (redo steps survive).
+    ///
+    /// # Errors
+    ///
+    /// [`DocumentError::StepOpen`] when a step is open; [`DocumentError::Edit`] when `edit`
+    /// refuses.
+    pub fn apply<F>(&mut self, label: impl Into<String>, edit: F) -> Result<(), DocumentError>
+    where
+        F: FnOnce(&Wavetable) -> Result<Wavetable, EditError>,
+    {
+        self.begin_step(label)?;
+        if let Err(e) = self.update_step(edit) {
+            self.open = None;
+            return Err(e);
+        }
+        self.finish_step()
     }
 
     /// The label of the step `undo` would revert, if there is one.
