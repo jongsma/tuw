@@ -6,13 +6,16 @@
 //! and fewer harmonics), and the oscillator reads the richest level that stays below Nyquist.
 //! This module holds the constants and the error type shared by all parts.
 
+mod kernel;
 mod levels;
 mod prepare;
+mod voice;
 
 use std::fmt;
 
 pub use levels::{LevelWeights, level_harmonics, level_length, level_weights};
 pub use prepare::{PreparedFrame, PreparedTable, Preparer};
+pub use voice::Voice;
 
 /// Most samples (`frame_size × y_size × z_size`) a table may have to be previewed.
 pub const MAX_PREVIEW_SAMPLES: u64 = 1 << 24;

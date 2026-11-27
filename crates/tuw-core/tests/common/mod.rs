@@ -4,6 +4,8 @@
 
 #![allow(dead_code)] // each test file uses a different subset
 
+pub mod spectrum;
+
 use proptest::prelude::*;
 use tuw3::{Metadata, Table};
 
