@@ -18,13 +18,56 @@ fn on(h: u32, f: f64, fs: f64) -> f64 {
 fn weight_vector(levels: &[u32], f: f32, fs: f32) -> Vec<f64> {
     let w = level_weights(levels, f, fs);
     let mut v = vec![0.0; levels.len()];
-    if w.w_first != 0.0 || w.w_second != 0.0 {
+    if w.w_first.to_bits() != 0 || w.w_second.to_bits() != 0 {
         v[w.first] = f64::from(w.w_first);
         if w.first + 1 < levels.len() {
             v[w.first + 1] = f64::from(w.w_second);
         }
     }
     v
+}
+
+/// Checks `first`, `w_first` and `w_second` against the independent `on()` (tolerance 1e-6:
+/// the weights are f32, whose rounding error is about 6e-8).
+fn check_pinned(levels: &[u32], f: f32, fs: f32) {
+    let w = level_weights(levels, f, fs);
+    let (f64f, fs64) = (f64::from(f), f64::from(fs));
+    match levels.iter().position(|&h| on(h, f64f, fs64) > 0.0) {
+        None => assert!(
+            w.w_first.to_bits() == 0 && w.w_second.to_bits() == 0,
+            "f = {f}"
+        ),
+        Some(first) => {
+            let o = on(levels[first], f64f, fs64);
+            assert_eq!(w.first, first, "first at f = {f}, fs = {fs}");
+            assert!(
+                (f64::from(w.w_first) - o).abs() < 1e-6,
+                "w_first at f = {f}"
+            );
+            let expect = if first + 1 < levels.len() {
+                1.0 - o
+            } else {
+                0.0
+            };
+            assert!(
+                (f64::from(w.w_second) - expect).abs() < 1e-6,
+                "w_second at f = {f}"
+            );
+        }
+    }
+}
+
+#[test]
+fn weights_for_a_known_note() {
+    // N = 600: levels 299, 211, 149, 105, 74, 52, ... At 440 Hz and 48 kHz, ny = 24 000:
+    // 74 * 440 = 32 560 > ny (off), 52 * 440 = 22 880 < ny, so first = 5 (H = 52),
+    // on = (24 000 - 22 880) / 4 800 = 0.23333 and w_second = 0.76667.
+    let levels = level_harmonics(600);
+    assert_eq!(&levels[..6], &[299, 211, 149, 105, 74, 52]);
+    let w = level_weights(&levels, 440.0, 48_000.0);
+    assert_eq!(w.first, 5);
+    assert!((f64::from(w.w_first) - 1120.0 / 4800.0).abs() < 1e-6);
+    assert!((f64::from(w.w_second) - 3680.0 / 4800.0).abs() < 1e-6);
 }
 
 #[test]
@@ -78,6 +121,7 @@ fn no_level_above_nyquist() {
                 freqs.push((f64::from(FADE_START) * ny / f64::from(h)) as f32);
             }
             for f in freqs {
+                check_pinned(&levels, f, fs);
                 let w = level_weights(&levels, f, fs);
                 let v = weight_vector(&levels, f, fs);
                 for (i, &weight) in v.iter().enumerate() {
@@ -110,6 +154,7 @@ fn weights_are_continuous() {
             let mut prev = weight_vector(&levels, f as f32, fs);
             for _ in 0..steps {
                 f *= ratio;
+                check_pinned(&levels, f as f32, fs);
                 let cur = weight_vector(&levels, f as f32, fs);
                 for (a, b) in prev.iter().zip(&cur) {
                     assert!((a - b).abs() <= 0.01, "jump at f = {f}: {a} -> {b}");

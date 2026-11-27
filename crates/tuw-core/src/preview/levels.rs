@@ -19,7 +19,7 @@ pub fn level_harmonics(frame_size: u32) -> Vec<u32> {
     levels.push(h);
     while h > 1 {
         let by_octave = (f64::from(h) / std::f64::consts::SQRT_2).round() as u32;
-        let by_ratio = h * 3 / 4;
+        let by_ratio = (u64::from(h) * 3 / 4) as u32; // floor(0.75 h), no u32 overflow
         let next = by_octave.min(by_ratio);
         h = if next < h { next } else { h - 1 };
         levels.push(h);
