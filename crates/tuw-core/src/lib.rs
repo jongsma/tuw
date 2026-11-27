@@ -21,7 +21,61 @@
 //!   [`EditError`] and changes nothing.
 //! - [`Selection`] is a rectangle on the grid. It is a separate value, not part of any
 //!   version, and selecting is not undoable. After an insert or remove, adjust it with
-//!   [`Selection::after_insert`] or [`Selection::after_remove`].
+//!   [`Selection::after_insert`] or [`Selection::after_remove`]. A [`Document`] does this
+//!   fitting for you: it fits its selection into the grid on every change.
+//!
+//! # The edit model
+//!
+//! A [`Document`] holds the current [`Wavetable`], a [`Selection`] and an undo history.
+//!
+//! - **History is snapshots.** Every finished step stores a whole version. Versions share
+//!   their untouched frames, so this is cheap, and undo and redo just move a cursor.
+//! - **A step is one undo entry.** [`Document::begin_step`] opens it, [`Document::update_step`]
+//!   runs an edit, and [`Document::finish_step`] records it. [`Document::cancel_step`] throws
+//!   it away. For a one-shot edit, [`Document::apply`] does all of that at once.
+//! - **Updates start from the start.** Each update gets the version the step began with, not
+//!   the result of the last update. A drag (a gain slider, say) can therefore call
+//!   `update_step` on every mouse move with the total change so far, and nothing piles up.
+//! - **The preview.** While a step is open, [`Document::current`] is its latest result.
+//!   [`Document::finished`] is always the state under the undo cursor, and
+//!   [`Document::change_id`] changes only when that state does. A preview can cache work
+//!   per `ChangeId` and show `current` while the step is open.
+//! - **Undo and redo** ([`Document::undo`], [`Document::redo`]) refuse while a step is open.
+//!   A step that changed nothing records nothing.
+//! - **Limit and saved marker.** The history keeps at most [`DEFAULT_HISTORY_LIMIT`] undo
+//!   steps unless you choose another. [`Document::is_modified`] and [`Document::mark_saved`]
+//!   track whether the state under the cursor is the saved one.
+//! - **UI-thread code.** A `Document` allocates, so it must never be used from an audio
+//!   callback. Hand the audio thread a finished [`Wavetable`] instead.
+//!
+//! ```
+//! use tuw_core::{Document, Wavetable};
+//!
+//! // A table whose only frame is all 1.0.
+//! let silent = Wavetable::silent(8, 1, 1)?;
+//! let table = silent.with_frame(0, 0, &[1.0; 8])?;
+//! let mut doc = Document::new(table, 50);
+//! let start = doc.finished().clone();
+//!
+//! doc.begin_step("Gain")?;
+//! for gain in [0.5_f32, 0.25] {
+//!     // Each update starts from the step's start, so the gains do not multiply.
+//!     doc.update_step(|from| {
+//!         let scaled: Vec<f32> = from.frame(0, 0)?.samples().iter().map(|x| x * gain).collect();
+//!         from.with_frame(0, 0, &scaled)
+//!     })?;
+//! }
+//! doc.finish_step()?;
+//!
+//! // Compare bit patterns: floats are never compared with `==`.
+//! let frame = doc.finished().frame(0, 0)?;
+//! assert!(frame.samples().iter().all(|x| x.to_bits() == 0.25_f32.to_bits()));
+//! assert_eq!(doc.undo_label(), Some("Gain"));
+//!
+//! doc.undo()?;
+//! assert!(Wavetable::ptr_eq(doc.finished(), &start));
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 //!
 //! # Example
 //!
