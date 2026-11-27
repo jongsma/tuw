@@ -1,7 +1,7 @@
 # Edit model with undo and redo
 
 - **Issue:** #25
-- **Status:** Clarifying (spec approved; plan to be written by the loop)
+- **Status:** Planned
 - **Crates:** tuw-core
 - **Format change:** no
 
@@ -239,13 +239,292 @@ and the saved marker are stored; whether labels are `&'static str` or `String`.
 
 ## Plan
 
-Written by the loop (or with the maintainer), after this spec is approved.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
+> (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
+> checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** a `Document` in `tuw-core` that records every change to a `Wavetable` as one undoable
+step, with open steps for gestures, linear snapshot undo and redo, a history limit, a selection
+that always fits the grid, a finished version with a change id, and unsaved-changes tracking.
+
+**Architecture:** the document keeps a list of *states* (a `Wavetable` version, the label of the
+step that made it, and a serial number) and a cursor on the current one; undo and redo move the
+cursor. An open step holds its label and its current result; its starting version is the state
+under the cursor, so cancel just drops the open step. Every update calls the tool's closure with
+that starting version. Change ids come from one process-wide atomic counter, so two documents
+never share one.
+
+**Tech stack:** Rust 2024 (MSRV 1.85), `std` only (`std::collections::VecDeque`,
+`std::sync::atomic::AtomicU64`); `proptest` (already a dev-dependency) for property tests.
+
+**Spec:** the *Spec* section above.
+
+### Global constraints
+
+- Every new `.rs` file starts with `// SPDX-License-Identifier: GPL-3.0-or-later`.
+- `tuw-core` gets no new dependency; no GUI, plugin or file I/O code.
+- Every public item has a doc comment (`#![warn(missing_docs)]`).
+- Never compare floats with `==`: tests compare samples by `f32::to_bits` (exact, no tolerance
+  needed) or tables with `assert_same` on deep snapshots (`to_tuw3()`).
+- A clone shares frames, so "unchanged" is shown with a deep snapshot, never against a clone
+  (`AGENTS.md` gotcha); "the very same version" is shown with `Wavetable::ptr_eq`.
+- No `unwrap`/`expect`/`panic!` on anything a caller can trigger: every refusal is an `Err`.
+- The document is UI-thread code (it allocates); its doc comment says so. Nothing in it is
+  reachable from an audio callback.
+- `cargo test --workspace` (never only `-p`), plus the other `AGENTS.md` commands, before each
+  commit.
+
+### Interfaces (all tasks)
+
+In `crates/tuw-core/src/table.rs`:
+
+```rust
+impl Wavetable {
+    /// Same sizes, the same metadata allocation and every frame the same buffer.
+    pub fn ptr_eq(a: &Wavetable, b: &Wavetable) -> bool;
+}
+```
+
+In `crates/tuw-core/src/error.rs`, a new enum next to `EditError`:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DocumentError {
+    StepOpen,      // undo, redo, begin_step or apply while a step is open
+    NoOpenStep,    // update_step, finish_step or cancel_step with no open step
+    NothingToUndo,
+    NothingToRedo,
+    Edit(EditError), // an update's closure refused the edit
+}
+```
+
+with `Display` and `std::error::Error` (`source` returns the `EditError`).
+
+In a new `crates/tuw-core/src/document.rs`:
+
+```rust
+pub const DEFAULT_HISTORY_LIMIT: usize = 200;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChangeId(u64); // fresh values from one process-wide AtomicU64
+
+pub struct Document { /* private */ }
+
+impl Document {
+    pub fn new(table: Wavetable, history_limit: usize) -> Document;
+    pub fn current(&self) -> &Wavetable;   // the open step's result, else the finished version
+    pub fn finished(&self) -> &Wavetable;  // the state under the cursor
+    pub fn change_id(&self) -> ChangeId;
+    pub fn selection(&self) -> Selection;
+    pub fn set_selection(&mut self, selection: Selection); // stored fitted to current()
+    pub fn history_limit(&self) -> usize;
+    pub fn is_step_open(&self) -> bool;
+    pub fn begin_step(&mut self, label: impl Into<String>) -> Result<(), DocumentError>;
+    pub fn update_step<F>(&mut self, edit: F) -> Result<(), DocumentError>
+    where
+        F: FnOnce(&Wavetable) -> Result<Wavetable, EditError>;
+    pub fn finish_step(&mut self) -> Result<(), DocumentError>;
+    pub fn cancel_step(&mut self) -> Result<(), DocumentError>;
+    pub fn apply<F>(&mut self, label: impl Into<String>, edit: F) -> Result<(), DocumentError>
+    where
+        F: FnOnce(&Wavetable) -> Result<Wavetable, EditError>;
+    pub fn undo(&mut self) -> Result<(), DocumentError>;
+    pub fn redo(&mut self) -> Result<(), DocumentError>;
+    pub fn undo_label(&self) -> Option<&str>;
+    pub fn redo_label(&self) -> Option<&str>;
+    pub fn is_modified(&self) -> bool;
+    pub fn mark_saved(&mut self);
+}
+```
+
+`lib.rs` re-exports `ChangeId`, `DEFAULT_HISTORY_LIMIT`, `Document` and `DocumentError`.
+
+Semantics the signatures don't show:
+
+- **History limit `n`:** at most `n` undo steps, so at most `n + 1` states. `0` means no undo
+  history: every finished step is recorded and at once becomes the only state.
+- **`finish_step`:** if the open step's result is `ptr_eq` to its starting version (no
+  successful update, or an update that returned the start), it records nothing and leaves the
+  change id alone. Otherwise it drops the states after the cursor (redo steps), pushes the new
+  state, drops the oldest state while there are more than `n + 1`, and takes a fresh change id.
+- **`apply`:** refuses with `StepOpen` while a step is open; otherwise runs one update and
+  finishes. If the update fails, the step is cancelled, so nothing changes and nothing is
+  recorded, and the error is returned.
+- **Saved marker:** `mark_saved` stores the serial of the state under the cursor;
+  `is_modified` is `serial(cursor) != saved`. Serials are never reused, so a saved state dropped
+  by the limit leaves the document modified until the next `mark_saved`.
+- **Selection:** after every change to `current()` (a successful update, cancel, finish, undo,
+  redo) the stored selection becomes `selection.fit(current())`.
+
+### Review focus
+
+1. **An update after a failed update** still starts from the step's starting version, not from
+   the last good update. Pinned in Task 2 (`failed_update_keeps_the_step_open`).
+2. **Undo right after a step that was dropped by a limit of 1**: one undo works, the second is
+   `NothingToUndo`. Pinned in Task 3 (`history_limit_drops_oldest`).
+3. **`apply` with a failing closure while there are redo steps**: the redo steps survive. Pinned
+   in Task 2 (`failed_apply_changes_nothing`).
+4. **Cancel after an update that removed rows**: the selection fits the restored grid again
+   without moving (the restored grid is bigger, so `fit` keeps it). Pinned in Task 4
+   (`selection_always_fits`).
+5. **The saved state on a discarded redo branch**: after step A, `mark_saved`, undo and a new
+   step B, no state counts as saved any more. Pinned in Task 4 (`saved_state_is_by_serial`).
+
+### Files
+
+- Modify `crates/tuw-core/src/table.rs`: `Wavetable::ptr_eq`.
+- Modify `crates/tuw-core/src/error.rs`: `DocumentError`.
+- Create `crates/tuw-core/src/document.rs`: `Document`, `ChangeId`, `DEFAULT_HISTORY_LIMIT`.
+- Modify `crates/tuw-core/src/lib.rs`: module, re-exports, an *Edit model* section in the crate
+  doc with a doctest.
+- Tests: `crates/tuw-core/tests/document.rs` (steps, selection, saved marker, change id) and
+  `crates/tuw-core/tests/history.rs` (undo, redo, limit, the reference-model property test).
 
 ---
 
 ## Tasks
 
-- [ ] T1 …
+### Task 1: the document's skeleton
+
+**Files:** modify `table.rs`, `error.rs`, `lib.rs`; create `document.rs`; test `tests/document.rs`.
+
+**Interfaces:** produces `Wavetable::ptr_eq`, `DocumentError`, `ChangeId`,
+`DEFAULT_HISTORY_LIMIT`, and `Document::{new, current, finished, change_id, selection,
+set_selection, history_limit, is_step_open, undo_label, redo_label, is_modified}` as above.
+
+- [ ] **Step 1: Write the failing tests** in `tests/document.rs`:
+  - `ptr_eq_means_same_buffers`: `t.clone()` is `ptr_eq` to `t`; `t.with_frame(0, 0, &[0.5; 8])`
+    is not; two separately built `Wavetable::silent(8, 2, 2)` are not; a table and itself after
+    `with_metadata(t.metadata().clone())` is not (new metadata allocation).
+  - `a_new_document` (AC11, AC12 in part): `Document::new(t, 10)`: `current()` and `finished()`
+    are `ptr_eq` to `t`; `selection() == Selection::all(&t)`; `!is_step_open()`;
+    `undo_label()` and `redo_label()` are `None`; `!is_modified()`; `history_limit() == 10`.
+  - `change_ids_are_unique_across_documents` (AC11): two `Document::new` calls on the same table
+    have different `change_id()`s.
+  - `set_selection_fits` (AC10): on a 3 × 2 table, setting `Selection::all` of a 5 × 5 table
+    stores `Selection::all` of the 3 × 2 table; setting `Selection::frame(&t, 1, 1)` keeps it.
+- [ ] **Step 2: Run** `cargo test --workspace`: fails to compile (no `Document`).
+- [ ] **Step 3: Implement** the interfaces of this task. One state, cursor 0, serial 0 and
+  `saved = Some(0)`; the change id from a `static NEXT_ID: AtomicU64` (`fetch_add(1, Relaxed)`).
+- [ ] **Step 4: Run** `cargo test --workspace`: passes.
+- [ ] **Step 5: Commit** `feat(tuw-core): add the document skeleton (#25)`.
+
+### Task 2: open steps (begin, update, finish, cancel, apply)
+
+**Files:** modify `document.rs`; test `tests/document.rs`.
+
+**Interfaces:** consumes Task 1. Produces `begin_step`, `update_step`, `finish_step`,
+`cancel_step`, `apply` as above; `finish_step` records a state (history list and redo dropping as
+in *Semantics*; the limit itself is Task 3).
+
+- [ ] **Step 1: Write the failing tests:**
+  - `updates_start_from_the_start` (AC2): table with frame (0, 0) = `[0.1, 0.2, …, 0.8]`;
+    `begin_step("Gain")`, then three updates each `|s| s.with_frame(0, 0, &gain(s, g))` with `g`
+    = 1.3, 1.5, 1.2, where `gain` multiplies the starting frame's samples by `g`; after each, the
+    bits of `current().frame(0, 0)` equal the starting samples × `g` (computed the same way, so
+    bit-exact). Each closure asserts its argument is `ptr_eq` to the starting table.
+  - `a_gesture_is_one_step` (AC3): 50 updates then `finish_step()`: `undo_label() == Some("Gain")`,
+    `!is_step_open()`, and `finished()` and `current()` are both `ptr_eq` to the 50th update's
+    result (keep a clone of `current()` after it). The single-undo half of AC3 is in Task 3.
+  - `cancel_restores_the_start` (AC4): after updates, `cancel_step()` makes `current()` `ptr_eq` to
+    the starting table; `undo_label()` stays `None`; `change_id()` unchanged.
+  - `empty_and_no_op_steps_record_nothing` (AC4): begin + finish; begin + an update returning
+    `Ok(s.clone())` + finish: both leave `undo_label() == None`, `change_id()` unchanged,
+    `!is_modified()`.
+  - `failed_update_keeps_the_step_open` (AC5, review focus 1): good update (gain 2), a failing one
+    (a NaN sample) returns `Err(DocumentError::Edit(EditError::NonFiniteSample { .. }))`, then
+    `current()` is still the gain-2 result and `is_step_open()`; a following good update's
+    closure still receives the starting table (`ptr_eq`); finishing records one step.
+  - `failed_apply_changes_nothing` (AC5): on a fresh document, a failing `apply` returns the
+    error, `!is_step_open()`, `current()` is `ptr_eq` to the original, `undo_label() == None`.
+    (With redo steps present: Task 3, `failed_apply_keeps_redo`.)
+  - `open_step_guards` (AC6): with a step open, `begin_step` and `apply` return
+    `Err(DocumentError::StepOpen)` and the open step is untouched (same `current()`);
+    without one, `update_step`, `finish_step` and `cancel_step` return `Err(NoOpenStep)`.
+- [ ] **Step 2: Run** `cargo test --workspace`: the new tests fail.
+- [ ] **Step 3: Implement** the five methods per *Semantics*.
+- [ ] **Step 4: Run** `cargo test --workspace`: passes.
+- [ ] **Step 5: Commit** `feat(tuw-core): record changes as steps (#25)`.
+
+### Task 3: undo, redo and the history limit
+
+**Files:** modify `document.rs`; test `tests/history.rs`.
+
+**Interfaces:** consumes Tasks 1–2. Produces `undo`, `redo` and the limit as in *Semantics*.
+
+- [ ] **Step 1: Write the failing tests** in `tests/history.rs`:
+  - `undo_and_redo_match_a_reference` (AC1): proptest over a `tuw3_table(3)` and 1–40 operations
+    drawn from: replace frame `(y % y_size, z % z_size)` with random finite samples; insert 1–2
+    rows or columns at `at % (size + 1)`; remove one row or column at `at % size` (skipped when
+    the axis has one frame); set `metadata.name`; undo; redo. The reference model is a
+    `Vec<tuw3::Table>` of deep snapshots plus a cursor, with linear history and no limit
+    (document limit `usize::MAX`). After each operation, `assert_same(&doc.current().to_tuw3(),
+    &reference[cursor])`; an undo or redo the reference can't do must return `NothingToUndo` /
+    `NothingToRedo` and change nothing.
+  - `a_gesture_undoes_in_one` (AC3): 50 updates, finish, one `undo()` gives `current()` `ptr_eq`
+    to the start; one `redo()` gives the finished result back (`ptr_eq`); a second `undo()` then
+    `undo()` again returns `NothingToUndo` on the second.
+  - `undo_and_redo_refused_while_open` (AC6): with a step open, `undo()` and `redo()` return
+    `StepOpen` and `current()` is unchanged.
+  - `a_new_step_drops_redo` (AC7): steps A, B, undo, step C: `redo()` returns `NothingToRedo`,
+    `undo_label() == Some("C")`.
+  - `history_limit_drops_oldest` (AC8, review focus 2): for limits 0, 1 and 3, finish `limit + 2`
+    steps; exactly `limit` undos succeed and the next returns `NothingToUndo`; the oldest
+    reachable version is the one after step 3 (deep snapshot taken when it was made).
+  - `labels_follow_the_cursor` (AC9): steps "A", "B": undo label "B", redo `None`; after undo:
+    undo "A", redo "B"; after another undo: undo `None`, redo "A".
+  - `failed_apply_keeps_redo` (AC5, review focus 3): steps A, B, undo, failing `apply`: `redo()`
+    still succeeds.
+- [ ] **Step 2: Run** `cargo test --workspace`: the new tests fail.
+- [ ] **Step 3: Implement** `undo`, `redo` (move the cursor, take a fresh change id) and the limit
+  (drop from the front of a `VecDeque`, moving the cursor with it).
+- [ ] **Step 4: Run** `cargo test --workspace`: passes.
+- [ ] **Step 5: Commit** `feat(tuw-core): add undo, redo and the history limit (#25)`.
+
+### Task 4: selection, finished version and unsaved changes
+
+**Files:** modify `document.rs`; test `tests/document.rs`.
+
+**Interfaces:** consumes Tasks 1–3. Produces `mark_saved`, `is_modified` (beyond the new-document
+case) and selection fitting on every change of `current()`.
+
+- [ ] **Step 1: Write the failing tests:**
+  - `selection_always_fits` (AC10, review focus 4): proptest over a `tuw3_table(4)`, a random
+    selection and 1–20 operations (updates that insert or remove rows and columns, finish, cancel,
+    undo, redo, `set_selection`): after each, `selection()` lies inside `current()`'s grid
+    (`y_range().end() < y_size`, same for Z). Plus a fixed case: select frame (1, 1) on a 3 × 3
+    table, a step that only replaces frames: the selection is still exactly (1, 1).
+  - `selection_is_not_history` (AC10): `set_selection` leaves `undo_label()`, `change_id()`,
+    `finished()` (`ptr_eq`) and `is_modified()` unchanged; undo doesn't restore an earlier
+    selection.
+  - `finished_version_and_change_id` (AC11): during an open step with updates, `finished()` is
+    `ptr_eq` to the start and `change_id()` doesn't change; `finish_step`, `undo` and `redo` each
+    give a `change_id()` different from all earlier ones (collect them in a `HashSet`) and leave
+    `finished()` `ptr_eq` to `current()`.
+  - `modified_follows_the_saved_state` (AC12): new → not modified; step → modified; undo → not;
+    redo → modified; `mark_saved` → not; undo → modified; and with a step open, `is_modified()`
+    reports the finished version (open step after `mark_saved`: not modified).
+  - `saved_state_dropped_by_the_limit` (AC12): limit 1, `mark_saved` on the new document, two
+    steps, undo once: modified (the saved state is gone), and stays so until `mark_saved`.
+  - `saved_state_is_by_serial` (review focus 5): step A, `mark_saved`, undo, step B: modified
+    (B is not A); undo: modified (the state before A was never saved); redo: modified (B again,
+    and A can't be reached any more).
+- [ ] **Step 2: Run** `cargo test --workspace`: the new tests fail.
+- [ ] **Step 3: Implement** the saved marker and the fit after every change of `current()`.
+- [ ] **Step 4: Run** `cargo test --workspace`: passes.
+- [ ] **Step 5: Commit** `feat(tuw-core): fit the selection and track unsaved changes (#25)`.
+
+### Task 5: crate docs
+
+**Files:** modify `lib.rs`.
+
+- [ ] **Step 1:** add an *Edit model* section to the crate doc (AC13): the document, steps
+  (begin, update from the start, finish or cancel; `apply` for one-shot edits), snapshot undo,
+  the finished version and change id for the preview, and that the document is UI-thread code.
+  Add a doctest: a document on a silent table, a gesture of two gain updates, finish, undo, with
+  `ptr_eq` assertions (no float `==`).
+- [ ] **Step 2: Run** the four `AGENTS.md` commands: all pass, no `missing_docs` warning.
+- [ ] **Step 3: Commit** `docs(tuw-core): describe the edit model in the crate docs (#25)`.
 
 ---
 
