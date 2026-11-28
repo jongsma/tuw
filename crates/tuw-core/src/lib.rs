@@ -79,6 +79,13 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
+//! # The preview
+//!
+//! - **[`preview`]** plays a prepared [`Wavetable`] through a band-limited oscillator, with
+//!   the preparing and the hand-off to the audio thread kept apart. See the module for the
+//!   levels, the aliasing bound the tests check and the rule that the audio thread never frees
+//!   memory.
+//!
 //! # Example
 //!
 //! ```
