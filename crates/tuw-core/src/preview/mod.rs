@@ -4,8 +4,11 @@
 //!
 //! Each frame is prepared once as a set of *levels* (the same waveform, band-limited to fewer
 //! and fewer harmonics), and the oscillator reads the richest level that stays below Nyquist.
-//! This module holds the constants and the error type shared by all parts.
+//! [`preview`] hands a [`Voice`] to the audio thread as an [`Oscillator`], fed lock-free by a
+//! [`PreviewControl`] on the UI thread. This module holds the constants and the error type
+//! shared by all parts.
 
+mod handoff;
 mod kernel;
 mod levels;
 mod prepare;
@@ -13,6 +16,7 @@ mod voice;
 
 use std::fmt;
 
+pub use handoff::{Oscillator, PreviewControl, preview};
 pub use levels::{LevelWeights, level_harmonics, level_length, level_weights};
 pub use prepare::{PreparedFrame, PreparedTable, Preparer};
 pub use voice::Voice;
