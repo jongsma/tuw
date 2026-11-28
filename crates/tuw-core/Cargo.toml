@@ -15,6 +15,8 @@ publish.workspace = true
 # No GUI or plugin dependencies (no egui, no nih-plug): any tool must be able to use this crate.
 [dependencies]
 tuw3.workspace = true
+rustfft = "6.4"
+rtrb = "0.4"
 
 [lints]
 workspace = true
