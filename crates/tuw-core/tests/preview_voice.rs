@@ -97,6 +97,15 @@ fn playhead_and_note_ramp() {
     assert_eq!(y.to_bits(), 0f32.to_bits(), "the ramp starts where it was");
     assert_eq!(f.to_bits(), 220f32.to_bits());
     for i in 0..len {
+        if i == len / 2 {
+            // Re-sending the targets mid-ramp must not restart the ramps.
+            v.set_playhead(3.0, 0.0);
+            v.set_frequency(440.0);
+        }
+        if i == len - 1 {
+            assert_ne!(v.playhead().0.to_bits(), 3f32.to_bits(), "arrived early");
+            assert_ne!(v.frequency().to_bits(), 440f32.to_bits(), "arrived early");
+        }
         one(&mut v);
         let (ny, nz) = v.playhead();
         let nf = v.frequency();
@@ -105,6 +114,7 @@ fn playhead_and_note_ramp() {
         assert_eq!(nz.to_bits(), z.to_bits(), "z did not change");
         (y, f) = (ny, nf);
     }
+    // Arrived on sample `len` exactly, and stays.
     for _ in 0..100 {
         assert_eq!(v.playhead().0.to_bits(), 3f32.to_bits());
         assert_eq!(v.frequency().to_bits(), 440f32.to_bits());
@@ -153,35 +163,59 @@ fn ramps_only_while_sounding() {
     assert_eq!(v.frequency().to_bits(), 550f32.to_bits());
 }
 
-/// Plays A (a 4 × 1 grid of sines) at y = 3, swaps to B (a 2 × 1 grid of inverted sines, where
-/// y clamps to 1) at a peak and returns (steady largest step of A, largest step from the swap
-/// on).
-fn swap_steps(mut v: Voice, fs: f32) -> (f32, f32) {
-    let a = row(&sine(2048, 1.0), 4);
-    let b = row(&sine(2048, -1.0), 2);
-    assert!(v.set_table(Arc::clone(&a)).is_none());
+/// Plays A at y = 3 on `v` up to a sine peak; returns (steady largest step, the peak sample).
+fn play_to_peak(v: &mut Voice, a: &Arc<PreparedTable>) -> (f32, f32) {
+    assert!(v.set_table(Arc::clone(a)).is_none());
     v.set_playhead(3.0, 0.0);
     v.set_frequency(LOW_NOTE);
     v.play();
-    render(&mut v, 1024);
-    let warm = one(&mut v);
-    let steady = render(&mut v, 2048);
-    let steady_step = largest_step(warm, &steady);
-    let before = to_peak(&mut v);
+    render(v, 1024);
+    let warm = one(v);
+    let steady = render(v, 2048);
+    (largest_step(warm, &steady), to_peak(v))
+}
+
+/// Plays A (a 4 × 1 grid of sines) at y = 3, swaps to B (a 2 × 1 grid of inverted sines, where
+/// y clamps to 1) at a peak and returns (steady largest step of A, largest step from the swap
+/// on). A twin voice made by `make` plays A on without the swap, so B's polarity can be checked
+/// sample by sample.
+fn swap_steps(make: impl Fn() -> Voice, fs: f32) -> (f32, f32) {
+    let a = row(&sine(2048, 1.0), 4);
+    let b = row(&sine(2048, -1.0), 2);
+    let (mut v, mut twin) = (make(), make());
+    let (steady_step, before) = play_to_peak(&mut v, &a);
+    let (_, twin_before) = play_to_peak(&mut twin, &a);
+    assert_eq!(
+        before.to_bits(),
+        twin_before.to_bits(),
+        "the twin is in step"
+    );
     assert!(v.set_table(Arc::clone(&b)).is_none());
-    let after = render(&mut v, 2 * samples(SWAP_FADE_SECONDS, fs) + 2048);
-    // The swap did happen: A came back, and B sounds at full level.
+    let fade = samples(SWAP_FADE_SECONDS, fs);
+    let after = render(&mut v, fade + 2048);
+    let unswapped = render(&mut twin, fade + 2048);
+    // The swap did happen: A came back, and after the fade B sounds as −A. B's levels are the
+    // exact negation of A's (the FFT, the scaling and the kernel sums are symmetric in sign),
+    // and both grids put the playhead on one identical frame, so 1e-6 is only slack for f32
+    // rounding.
     let retired = v.take_retired().expect("A is retired after the swap");
     assert!(Arc::ptr_eq(&retired, &a));
-    let tail = &after[after.len() - 1024..];
-    assert!(tail.iter().any(|s| s.abs() > 0.99), "B is not sounding");
+    let mut checked = 0;
+    for (i, (&s, &r)) in after.iter().zip(&unswapped).enumerate().skip(fade) {
+        assert!((s + r).abs() <= 1e-6, "sample {i}: {s} is not −{r}");
+        if r.abs() > 0.5 {
+            assert!(s.signum() == -r.signum(), "sample {i}: polarity");
+            checked += 1;
+        }
+    }
+    assert!(checked > 100, "too few loud samples to check polarity");
     (steady_step, largest_step(before, &after))
 }
 
 #[test]
 fn no_click_on_swap() {
     let fs = 48_000.0f32;
-    let (steady, swap) = swap_steps(Voice::new(fs).unwrap(), fs);
+    let (steady, swap) = swap_steps(|| Voice::new(fs).unwrap(), fs);
     // The steady largest step of a unit sine is about 2π f / fs.
     let expected = 2.0 * std::f32::consts::PI * LOW_NOTE / fs;
     assert!(
@@ -192,16 +226,20 @@ fn no_click_on_swap() {
     // right angles to the sine's own slope: about 1.04 × steady. 1.5 × leaves room and still
     // catches any jump.
     let bound = 1.5 * steady;
-    println!("swap: steady {steady}, largest {swap}, bound {bound}");
-    assert!(swap <= bound, "swap step {swap} > {bound}");
+    assert!(
+        swap <= bound,
+        "swap step {swap} > {bound} (steady {steady})"
+    );
 
     // Control: the same swap without a fade clicks (a jump of about 2 at the peak).
     let (steady, swap) = swap_steps(
-        Voice::with_times(fs, SMOOTHING_SECONDS, 0.0, PLAY_FADE_SECONDS).unwrap(),
+        || Voice::with_times(fs, SMOOTHING_SECONDS, 0.0, PLAY_FADE_SECONDS).unwrap(),
         fs,
     );
-    println!("swap without fade: steady {steady}, largest {swap}");
-    assert!(swap > 1.5 * steady, "the control did not click: {swap}");
+    assert!(
+        swap > 1.5 * steady,
+        "the control did not click: {swap} (steady {steady})"
+    );
 }
 
 /// Plays a unit sine at the low note, starting near a peak, stops at a peak, and returns
@@ -233,7 +271,6 @@ fn no_click_on_play_stop() {
     // A linear gain ramp over 240 samples adds at most 1 / 240 per sample, at right angles to
     // the sine's own slope: about 1.04 × steady. 1.5 × leaves room and still catches a jump.
     let bound = 1.5 * steady;
-    println!("play/stop: steady {steady}, play {play}, stop {stop}, bound {bound}");
     assert!(play <= bound, "play step {play} > {bound}");
     assert!(stop <= bound, "stop step {stop} > {bound}");
     let fade = samples(PLAY_FADE_SECONDS, fs);
@@ -247,7 +284,6 @@ fn no_click_on_play_stop() {
         Voice::with_times(fs, SMOOTHING_SECONDS, SWAP_FADE_SECONDS, 0.0).unwrap(),
         fs,
     );
-    println!("play/stop without fade: steady {steady}, play {play}, stop {stop}");
     assert!(
         play > 1.5 * steady,
         "the play control did not click: {play}"
@@ -285,7 +321,11 @@ fn swap_queue() {
         v.take_retired().is_none(),
         "nothing retired before the fade ends"
     );
-    render(&mut v, samples(SWAP_FADE_SECONDS, fs));
+    let fade = samples(SWAP_FADE_SECONDS, fs);
+    render(&mut v, fade - 1);
+    assert!(v.is_swapping());
+    assert!(v.take_retired().is_none(), "retired one sample early");
+    one(&mut v);
     assert!(v.is_swapping(), "a retired table not yet taken");
     let back = v.set_table(Arc::clone(&c)).expect("refused while A waits");
     assert!(Arc::ptr_eq(&back, &c));
@@ -311,4 +351,58 @@ fn swap_queue() {
     assert!(v.set_table(Arc::clone(&c)).is_none());
     let retired = v.take_retired().expect("B at once");
     assert!(Arc::ptr_eq(&retired, &b));
+}
+
+/// Plays the low-note sine, sets an unusable note (0 Hz) at a peak, and after the fade the low
+/// note again; returns (steady largest step, largest step from the mute on, the muted samples
+/// after the fade).
+fn unusable_note_steps(mut v: Voice, fs: f32) -> (f32, f32, Vec<f32>) {
+    assert!(v.set_table(row(&sine(2048, 1.0), 1)).is_none());
+    v.set_frequency(LOW_NOTE);
+    v.play();
+    render(&mut v, 1024);
+    let warm = one(&mut v);
+    let steady = render(&mut v, 2048);
+    let steady_step = largest_step(warm, &steady);
+    let before = to_peak(&mut v);
+    v.set_frequency(0.0);
+    let fade = samples(PLAY_FADE_SECONDS, fs);
+    let muted = render(&mut v, fade + 1024);
+    v.set_frequency(LOW_NOTE);
+    let back = render(&mut v, 2048);
+    assert!(
+        back[1024..].iter().any(|s| s.abs() > 0.99),
+        "the note did not come back"
+    );
+    let mut all = muted.clone();
+    all.extend_from_slice(&back);
+    (
+        steady_step,
+        largest_step(before, &all),
+        muted[fade..].to_vec(),
+    )
+}
+
+#[test]
+fn no_click_on_unusable_note() {
+    let fs = 48_000.0f32;
+    let (steady, step, silent) = unusable_note_steps(Voice::new(fs).unwrap(), fs);
+    // The mute and the return ramp the note gain like play/stop: about 1.04 × steady (see
+    // `no_click_on_play_stop`); 1.5 × still catches a jump.
+    let bound = 1.5 * steady;
+    assert!(step <= bound, "step {step} > {bound} (steady {steady})");
+    assert!(
+        silent.iter().all(|s| s.to_bits() == 0),
+        "not exact zeros once muted"
+    );
+
+    // Control: without the fade, the mute at a peak jumps by about 1.
+    let (steady, step, _) = unusable_note_steps(
+        Voice::with_times(fs, SMOOTHING_SECONDS, SWAP_FADE_SECONDS, 0.0).unwrap(),
+        fs,
+    );
+    assert!(
+        step > 1.5 * steady,
+        "the control did not click: {step} (steady {steady})"
+    );
 }

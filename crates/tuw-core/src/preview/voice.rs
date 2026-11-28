@@ -52,11 +52,12 @@ impl Ramp {
     }
 
     /// Starts a ramp from the current value to `target` over `len` samples (a jump if `len`
-    /// is 0).
+    /// is 0). Asking for the target it already has (same bits) does not restart a running
+    /// ramp: it keeps its arrival sample.
     fn to(&mut self, target: f32, len: u32) {
         if len == 0 {
             self.jump(target);
-        } else {
+        } else if target.to_bits() != self.target.to_bits() {
             *self = Ramp {
                 value: self.value,
                 start: self.value,
@@ -110,7 +111,9 @@ fn ramp_samples(seconds: f32, sample_rate: f32) -> u32 {
 /// [`set_frequency`](Voice::set_frequency) ramp linearly to the new value over
 /// [`SMOOTHING_SECONDS`]; a new value mid-ramp starts a new ramp from where it is. While the
 /// voice is silent, they jump. [`play`](Voice::play) and [`stop`](Voice::stop) ramp the gain
-/// over [`PLAY_FADE_SECONDS`]; after the stop fade the output is exact zeros.
+/// over [`PLAY_FADE_SECONDS`]; after the stop fade the output is exact zeros. An unusable note
+/// (see [`set_frequency`](Voice::set_frequency)) fades the note out the same way, and a usable
+/// one fades it back in.
 ///
 /// # Table swaps
 ///
@@ -135,8 +138,10 @@ pub struct Voice {
     /// Smoothed playhead (finite, not yet clamped: each table clamps it to its own grid).
     y: Ramp,
     z: Ramp,
-    /// Smoothed note in Hz; 0 while the last value set was not a usable frequency (silence).
+    /// Smoothed note in Hz: the last usable note (0 before any), kept while the note is muted.
     frequency: Ramp,
+    /// Note gain, 0 (muted by an unusable note, or no note yet) to 1; multiplies `gain`.
+    note_gain: Ramp,
     /// Output gain, 0 (stopped) to 1 (playing).
     gain: Ramp,
     /// Weight of `current` during a swap, ramping 0 to 1; `fading` gets the rest.
@@ -205,6 +210,7 @@ impl Voice {
             y: Ramp::at(0.0),
             z: Ramp::at(0.0),
             frequency: Ramp::at(0.0),
+            note_gain: Ramp::at(0.0),
             gain: Ramp::at(0.0),
             mix: Ramp::at(1.0),
             smoothing_len: ramp_samples(smoothing_seconds, sample_rate),
@@ -268,17 +274,25 @@ impl Voice {
         }
     }
 
-    /// Sets the note to `hz`: smoothly while sounding, at once while silent. A value that is
-    /// not finite or not positive means silence at once: no level sounds and the phase holds.
-    /// Coming back from such a value, the note jumps too (there is nothing to ramp from).
+    /// Sets the note to `hz`: smoothly while sounding, at once while silent.
+    ///
+    /// A value that is not finite or not positive is unusable: it mutes the note, fading it
+    /// out over the play/stop fade while sounding (at once while silent), with the last usable
+    /// note; once fully muted, nothing sounds and the phase holds. Play/stop state does not
+    /// change. A usable note after that jumps if the mute has completed (nothing sounds, so
+    /// nothing clicks) and ramps otherwise, and the note fades back in.
     pub fn set_frequency(&mut self, hz: f32) {
+        let fade = if self.is_sounding() { self.play_len } else { 0 };
         if !(hz.is_finite() && hz > 0.0) {
-            self.frequency.jump(0.0);
-        } else if self.frequency.value > 0.0 {
+            self.note_gain.to(0.0, fade);
+            return;
+        }
+        if self.note_gain.value > 0.0 {
             self.frequency.to(hz, self.ramp_len());
         } else {
             self.frequency.jump(hz);
         }
+        self.note_gain.to(1.0, fade);
     }
 
     /// The smoothing ramp length now: 0 (a jump) while silent.
@@ -296,8 +310,8 @@ impl Voice {
         (self.y.value, self.z.value)
     }
 
-    /// The smoothed note in Hz as of the last rendered sample (0 for silence). For tests: it
-    /// shows the ramp.
+    /// The smoothed note in Hz as of the last rendered sample: 0 before any usable note, and
+    /// the last usable note while an unusable one mutes it. For tests: it shows the ramp.
     pub fn frequency(&self) -> f32 {
         self.frequency.value
     }
@@ -326,10 +340,18 @@ impl Voice {
         for sample in out.iter_mut() {
             self.gain.advance();
             self.frequency.advance();
+            self.note_gain.advance();
             self.y.advance();
             self.z.advance();
             self.mix.advance();
-            let (y, z, frequency) = (self.y.value, self.z.value, self.frequency.value);
+            // A fully muted note renders as no note: silent weights, phase held.
+            let frequency = if self.note_gain.value > 0.0 {
+                self.frequency.value
+            } else {
+                0.0
+            };
+            let (y, z) = (self.y.value, self.z.value);
+            let gain = f64::from(self.gain.value) * f64::from(self.note_gain.value);
             let mix = if self.fading.is_some() {
                 f64::from(self.mix.value)
             } else {
@@ -364,8 +386,8 @@ impl Voice {
                 sum += (1.0 - mix) * value;
             }
             // At gain 0 write +0.0 itself: a negative sum times 0 would be −0.0.
-            *sample = if self.gain.value > 0.0 {
-                (sum * f64::from(self.gain.value)).clamp(-max, max) as f32
+            *sample = if gain > 0.0 {
+                (sum * gain).clamp(-max, max) as f32
             } else {
                 0.0
             };

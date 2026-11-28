@@ -12,7 +12,9 @@ use std::sync::Arc;
 
 use common::spectrum::worst_non_harmonic_db;
 use tuw_core::Wavetable;
-use tuw_core::preview::{FADE_START, PreparedTable, Preparer, Voice, level_weights};
+use tuw_core::preview::{
+    FADE_START, PLAY_FADE_SECONDS, PreparedTable, Preparer, Voice, level_weights,
+};
 
 /// Samples analysed per spectrum: 2¹⁵ keeps the debug-build suite fast and resolves harmonics
 /// of MIDI 48 at 96 kHz about 45 bins apart.
@@ -286,11 +288,13 @@ fn edge_notes() {
         );
     }
 
+    let play_fade = (f64::from(PLAY_FADE_SECONDS) * f64::from(fs)).round() as usize;
     for f in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, -440.0] {
         let mut v = voice(&saw_table, fs, 440.0, 0.0, 0.0);
         render(&mut v, 100, 0);
         v.set_frequency(f);
-        let out = render(&mut v, 0, 4096);
+        // An unusable note fades out like stop; exact silence follows the fade.
+        let out = render(&mut v, play_fade, 4096);
         assert!(out.iter().all(|s| s.to_bits() == 0), "{f} Hz is not silent");
         assert_eq!(v.last_weights().w_first.to_bits(), 0f32.to_bits());
         assert_eq!(v.last_weights().w_second.to_bits(), 0f32.to_bits());
