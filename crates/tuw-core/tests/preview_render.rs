@@ -10,7 +10,7 @@ mod common;
 use std::f64::consts::PI;
 use std::sync::Arc;
 
-use common::spectrum::worst_non_harmonic_db;
+use common::spectrum::{GUARD_BINS, MIN_SPACING_BINS, worst_non_harmonic_db};
 use tuw_core::Wavetable;
 use tuw_core::preview::{
     FADE_START, PLAY_FADE_SECONDS, PreparedTable, Preparer, Voice, level_weights,
@@ -82,27 +82,83 @@ fn assert_close(a: &[f32], b: &[f32], tolerance: f32, what: &str) {
     }
 }
 
+/// Analysis lengths for the crossfade notes, shortest first: low notes need the longer ones to
+/// keep their harmonics [`MIN_SPACING_BINS`] apart.
+const CROSSFADE_ANALYSES: [usize; 3] = [1 << 15, 1 << 16, 1 << 17];
+
+/// The shortest of [`CROSSFADE_ANALYSES`] that resolves the harmonics of `f`.
+fn analysis_for(f: f64, fs: f64) -> usize {
+    CROSSFADE_ANALYSES
+        .into_iter()
+        .find(|&n| f * n as f64 / fs >= MIN_SPACING_BINS)
+        .expect("a note too low for the longest analysis")
+}
+
+/// How far, in bins of an `n`-point analysis, the first alias of `f` lands from the nearest
+/// harmonic. Every alias of a harmonic at `fs` lies at `k f ± m fs`, so it is `m (fs mod f)`
+/// away from a harmonic; the first, `fs mod f`, is the closest one that can hide in a guard band.
+fn alias_offset_bins(f: f64, fs: f64, n: usize) -> f64 {
+    let r = fs % f;
+    r.min(f - r) * n as f64 / fs
+}
+
 #[test]
 fn no_aliasing_rendered() {
     let n = 2048;
     let saw_table = table(n as u32, 1, 1, &[saw(n)]);
     let levels = saw_table.levels().to_vec();
-    let mid = levels[levels.len() / 2];
     let mut failures = Vec::new();
     for fs in [44_100.0f64, 48_000.0, 96_000.0] {
         let ny = fs / 2.0;
-        let mut notes: Vec<f64> = [48.0, 69.0, 96.0, 108.0, 120.0]
+        // (note, analysis length): MIDI notes across the range, ...
+        let mut notes: Vec<(f64, usize)> = [48.0, 69.0, 96.0, 108.0, 120.0]
             .iter()
-            .map(|&m| midi(m))
+            .map(|&m| (midi(m), ANALYSIS))
             .collect();
-        // Inside the crossfade of the mid level: its weight there is exactly 0.5.
-        notes.push((1.0 + f64::from(FADE_START)) / 2.0 * ny / f64::from(mid));
-        for f in notes {
+        // ... and one note inside each crossfade, where level l and level l + 1 both weigh
+        // about 0.5: on(l) = (ny − H_l f) / ((1 − FADE_START) ny) = 0.5 there.
+        let mut checked = vec![false; levels.len()];
+        for l in 0..levels.len() - 1 {
+            let f = (1.0 + f64::from(FADE_START)) / 2.0 * ny / f64::from(levels[l]);
+            let f = f64::from(f as f32); // the note the voice plays
+            let w = level_weights(&levels, f as f32, fs as f32);
+            assert_eq!(
+                w.first, l,
+                "fs {fs}, f {f:.2} Hz: not level {l}'s crossfade"
+            );
+            assert!(
+                w.w_first > 0.0 && w.w_second > 0.0,
+                "fs {fs}, f {f:.2} Hz: the crossfade does not mix: {w:?}"
+            );
+            let analysis = analysis_for(f, fs);
+            let offset = alias_offset_bins(f, fs, analysis);
+            if offset <= GUARD_BINS {
+                // An alias this close to a harmonic hides in its guard band, so the analysis
+                // can't see it: skip the note. The crossfades next to it cover both levels.
+                println!(
+                    "fs {fs}, f {f:.2} Hz (levels {l}, {}): skipped, first alias {offset:.1} \
+                     bins from a harmonic",
+                    l + 1
+                );
+                continue;
+            }
+            checked[l] = true;
+            checked[l + 1] = true;
+            notes.push((f, analysis));
+        }
+        assert!(
+            checked.iter().all(|&c| c),
+            "fs {fs}: a level is in no checked crossfade: {checked:?}"
+        );
+        for (f, analysis) in notes {
             let w = level_weights(&levels, f as f32, fs as f32);
             let mut v = voice(&saw_table, fs as f32, f as f32, 0.0, 0.0);
-            let out = render(&mut v, WARM_UP, ANALYSIS);
+            let out = render(&mut v, WARM_UP, analysis);
             let db = worst_non_harmonic_db(&out, f64::from(f as f32), fs);
-            println!("fs {fs}, f {f:.2} Hz, weights {w:?}: worst {db:.1} dB");
+            println!(
+                "fs {fs}, f {f:.2} Hz, 2^{} samples, weights {w:?}: worst {db:.1} dB",
+                analysis.trailing_zeros()
+            );
             if db > -80.0 {
                 failures.push(format!("fs {fs}, f {f:.2} Hz: {db:.1} dB"));
             }
@@ -323,6 +379,9 @@ fn edge_notes() {
         v.play();
         let out = render(&mut v, 0, 2048);
         // The same voice state as the reference, so the same arithmetic.
-        assert_close(&out, &reference, 0.0, "non-finite playhead");
+        assert_eq!(out.len(), reference.len());
+        for (i, (a, b)) in out.iter().zip(&reference).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "non-finite playhead: sample {i}");
+        }
     }
 }

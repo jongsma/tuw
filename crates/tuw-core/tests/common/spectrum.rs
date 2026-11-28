@@ -28,7 +28,12 @@ fn blackman_harris(n: usize) -> Vec<f64> {
 /// (DC included), in dB relative to the fundamental's bin.
 ///
 /// The signal is windowed with a 4-term Blackman–Harris window and analysed by an f64 FFT of
-/// its whole length. Panics if harmonics are closer than [`MIN_SPACING_BINS`] or if no bin was
+/// its whole length.
+///
+/// Blind spots: bins within [`GUARD_BINS`] of DC and of each harmonic are not examined, so
+/// anything that lands there (a DC offset, or an alias that falls on or next to a harmonic,
+/// for example when the sample rate is a multiple of the note) is not measured. A test that
+/// needs those caught must choose its notes so their aliases fall outside the guard bands. Panics if harmonics are closer than [`MIN_SPACING_BINS`] or if no bin was
 /// examined, so a test using it can never pass vacuously.
 pub fn worst_non_harmonic_db(signal: &[f32], note: f64, sample_rate: f64) -> f64 {
     let n = signal.len();

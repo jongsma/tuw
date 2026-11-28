@@ -406,3 +406,45 @@ fn no_click_on_unusable_note() {
         "the control did not click: {step} (steady {steady})"
     );
 }
+
+#[test]
+fn playhead_clamps_on_a_smaller_grid() {
+    // 51 200 Hz makes the ramp 1024 samples, so every value 3 − k/1024 on it is exact in f32
+    // (see `playhead_and_note_ramp`); 1e-6 is only slack for that bound.
+    let fs = 51_200.0f32;
+    let len = samples(SMOOTHING_SECONDS, fs);
+    assert_eq!(len, 1024);
+    let frame = sine(256, 1.0);
+    let mut v = Voice::new(fs).unwrap();
+    assert!(v.set_table(row(&frame, 256)).is_none());
+    v.set_playhead(200.0, 0.0);
+    v.set_frequency(220.0);
+    v.play();
+    render(&mut v, 2 * samples(PLAY_FADE_SECONDS, fs)); // sounding at full gain
+
+    // The swap clamps the playhead into the new 4-frame grid at once.
+    assert!(v.set_table(row(&frame, 4)).is_none());
+    assert!(v.is_swapping());
+    let (mut y, z) = v.playhead();
+    assert_eq!(y.to_bits(), 3f32.to_bits(), "clamped into the new grid");
+    assert_eq!(z.to_bits(), 0f32.to_bits());
+
+    // From there, 3 → 2 is a ramp over the whole smoothing time, not a late step.
+    v.set_playhead(2.0, 0.0);
+    let max_dy = 1.0 / len as f32 + 1e-6;
+    for i in 0..len {
+        if i == len - 1 {
+            assert_ne!(v.playhead().0.to_bits(), 2f32.to_bits(), "arrived early");
+        }
+        one(&mut v);
+        let ny = v.playhead().0;
+        assert!((ny - y).abs() <= max_dy, "sample {i}: y {y} -> {ny}");
+        let expected = 3.0 - (i + 1) as f32 / len as f32;
+        assert!(
+            (ny - expected).abs() <= 1e-6,
+            "sample {i}: y {ny}, not {expected}"
+        );
+        y = ny;
+    }
+    assert_eq!(v.playhead().0.to_bits(), 2f32.to_bits());
+}

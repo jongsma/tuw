@@ -72,6 +72,21 @@ impl Ramp {
         self.done < self.len
     }
 
+    /// Clamps the ramp into `0..=last`: value, start and target. A running ramp goes on from
+    /// the clamped value to the clamped target over the samples it has left, so it stays
+    /// linear and arrives when it would have.
+    fn clamp_to(&mut self, last: f32) {
+        let value = self.value.clamp(0.0, last);
+        let target = self.target.clamp(0.0, last);
+        *self = Ramp {
+            value,
+            start: value,
+            target,
+            len: self.len - self.done,
+            done: 0,
+        };
+    }
+
     /// One sample further.
     fn advance(&mut self) {
         if !self.is_running() {
@@ -120,10 +135,12 @@ fn ramp_samples(seconds: f32, sample_rate: f32) -> u32 {
 /// [`set_table`](Voice::set_table) into a voice without a table installs it. With a table
 /// and silent, it replaces the table at once and *retires* the old one. With a table and
 /// sounding, the new table fades in and the old one fades out linearly over
-/// [`SWAP_FADE_SECONDS`]; both play at the same phase, playhead and note (each table clamps the
-/// playhead into its own grid), and the old one is retired when the fade ends. A retired table
-/// waits for [`take_retired`](Voice::take_retired). The voice never clones or drops a table: it
-/// only moves the ones it is given.
+/// [`SWAP_FADE_SECONDS`]; both play at the same phase, playhead and note, and the old one is
+/// retired when the fade ends. Taking a table clamps the playhead into its grid at once; the
+/// fading table keeps the playhead it had, so it plays on without a jump (each table still
+/// clamps the playhead into its own grid). A retired table waits for
+/// [`take_retired`](Voice::take_retired). The voice never clones or drops a table: it only
+/// moves the ones it is given.
 pub struct Voice {
     sample_rate: f32,
     kernel: Kernel,
@@ -135,9 +152,14 @@ pub struct Voice {
     retired: Option<Arc<PreparedTable>>,
     /// Position in the period, `0.0..1.0`.
     phase: f64,
-    /// Smoothed playhead (finite, not yet clamped: each table clamps it to its own grid).
+    /// Smoothed playhead (finite). Clamped into the grid of `current` when the voice takes a
+    /// table; `set_playhead` may move it past the grid later, so each table still clamps it.
     y: Ramp,
     z: Ramp,
+    /// The playhead of `fading` during a swap: the playhead as it was before the swap clamped
+    /// it, moved by `set_playhead` like `y` and `z`, so the old table plays on without a jump.
+    fading_y: Ramp,
+    fading_z: Ramp,
     /// Smoothed note in Hz: the last usable note (0 before any), kept while the note is muted.
     frequency: Ramp,
     /// Note gain, 0 (muted by an unusable note, or no note yet) to 1; multiplies `gain`.
@@ -209,6 +231,8 @@ impl Voice {
             phase: 0.0,
             y: Ramp::at(0.0),
             z: Ramp::at(0.0),
+            fading_y: Ramp::at(0.0),
+            fading_z: Ramp::at(0.0),
             frequency: Ramp::at(0.0),
             note_gain: Ramp::at(0.0),
             gain: Ramp::at(0.0),
@@ -234,18 +258,29 @@ impl Voice {
         }
         // Not swapping, so `fading` and `retired` are both empty.
         let Some(old) = self.current.take() else {
+            self.clamp_playhead(&table);
             self.current = Some(table);
             return None;
         };
         if self.is_sounding() && self.swap_len > 0 {
             self.fading = Some(old);
+            self.fading_y = self.y;
+            self.fading_z = self.z;
             self.mix.jump(0.0);
             self.mix.to(1.0, self.swap_len);
         } else {
             self.retired = Some(old);
         }
+        self.clamp_playhead(&table);
         self.current = Some(table);
         None
+    }
+
+    /// Clamps the playhead ramps into `table`'s grid, so a later move starts from where the
+    /// table really plays (a ramp from far past the grid would sit at the edge and then step).
+    fn clamp_playhead(&mut self, table: &PreparedTable) {
+        self.y.clamp_to(last_index(table.y_size()));
+        self.z.clamp_to(last_index(table.z_size()));
     }
 
     /// Whether a swap is fading, or a retired table waits for
@@ -263,14 +298,23 @@ impl Voice {
 
     /// Moves the playhead to (`y`, `z`), in frames: smoothly while sounding, at once while
     /// silent. Each coordinate is clamped into the grid of the table being played; a
-    /// coordinate that is not finite is ignored (the previous value, or ramp, stays).
+    /// coordinate that is not finite is ignored (the previous value, or ramp, stays). When the
+    /// voice takes a table, the playhead is clamped into its grid at once, so a move after a
+    /// swap to a smaller grid ramps over the whole smoothing time.
     pub fn set_playhead(&mut self, y: f32, z: f32) {
         let len = self.ramp_len();
+        let fading = self.fading.is_some();
         if y.is_finite() {
             self.y.to(y, len);
+            if fading {
+                self.fading_y.to(y, len);
+            }
         }
         if z.is_finite() {
             self.z.to(z, len);
+            if fading {
+                self.fading_z.to(z, len);
+            }
         }
     }
 
@@ -304,8 +348,9 @@ impl Voice {
         }
     }
 
-    /// The smoothed playhead (`y`, `z`) as of the last rendered sample, before each table
-    /// clamps it into its grid. For tests: it shows the ramp.
+    /// The smoothed playhead (`y`, `z`) as of the last rendered sample: clamped into the grid
+    /// of the table the voice last took, but not into a grid `set_playhead` has moved it past
+    /// since. For tests: it shows the ramp.
     pub fn playhead(&self) -> (f32, f32) {
         (self.y.value, self.z.value)
     }
@@ -343,6 +388,8 @@ impl Voice {
             self.note_gain.advance();
             self.y.advance();
             self.z.advance();
+            self.fading_y.advance();
+            self.fading_z.advance();
             self.mix.advance();
             // A fully muted note renders as no note: silent weights, phase held.
             let frequency = if self.note_gain.value > 0.0 {
@@ -378,8 +425,8 @@ impl Voice {
                     &self.kernel,
                     old,
                     self.phase,
-                    y,
-                    z,
+                    self.fading_y.value,
+                    self.fading_z.value,
                     frequency,
                     self.sample_rate,
                 );
@@ -461,4 +508,11 @@ fn axis(position: f32, size: u32) -> (u32, u32, f64) {
     let i0 = (p.floor() as u32).min(last);
     let i1 = i0.saturating_add(1).min(last);
     (i0, i1, p - f64::from(i0))
+}
+
+/// The last frame index on an axis of `size` frames, as a playhead coordinate.
+fn last_index(size: u32) -> f32 {
+    // A prepared table has at most `MAX_PREVIEW_SAMPLES` (2^24) samples, so `size - 1` is below
+    // 2^24 and exact in f32.
+    size.saturating_sub(1) as f32
 }

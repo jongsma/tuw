@@ -140,7 +140,8 @@ pub const FADE_START: f32 = 0.8;
 /// Number of taps of the interpolation kernel.
 pub const KERNEL_TAPS: usize = 16;
 
-/// Number of fractional offsets the interpolation kernel is tabulated at.
+/// Number of steps per sample at which the interpolation kernel is tabulated; the table has
+/// `KERNEL_PHASES + 1` rows, so both ends of a sample's step (offsets 0 and 1) are rows.
 pub const KERNEL_PHASES: usize = 512;
 
 /// Kaiser window shape parameter of the interpolation kernel.

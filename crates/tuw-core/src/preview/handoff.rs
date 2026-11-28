@@ -19,6 +19,14 @@ use rtrb::{Consumer, Producer, RingBuffer};
 
 use super::{PreparedTable, PreviewError, Voice};
 
+// Both halves are made on one thread and the `Oscillator` is moved to the audio thread, so
+// both must stay `Send`; this fails to compile if a field ever makes either of them not.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<Oscillator>();
+    assert_send::<PreviewControl>();
+};
+
 /// Largest ring capacity [`preview`] uses; a larger request is clamped to it. It bounds the
 /// memory the rings and holding slots take, so no capacity can make [`preview`] fail.
 const MAX_CAPACITY: usize = 1 << 16;
@@ -223,7 +231,7 @@ impl Oscillator {
         self.holding.iter().filter(|slot| slot.is_some()).count()
     }
 
-    /// Moves held tables onto the return ring while it has room, oldest slot first.
+    /// Moves held tables onto the return ring while it has room, in slot order.
     fn flush_holding(&mut self) {
         for slot in self.holding.iter_mut().filter(|slot| slot.is_some()) {
             // The ring slot is reserved before the table is taken out of the holding slot,
