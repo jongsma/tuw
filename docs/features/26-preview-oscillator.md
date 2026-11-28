@@ -1,7 +1,7 @@
 # Band-limited preview oscillator
 
 - **Issue:** #26
-- **Status:** Planned
+- **Status:** Done
 - **Crates:** tuw-core
 - **Format change:** no
 
@@ -115,54 +115,54 @@ oscillator in an audio device stream; this issue is headless.
 
 ### Acceptance criteria
 
-- [ ] **AC1 (levels are band-limited):** for random frames (property test, frame sizes including
+- [x] **AC1 (levels are band-limited):** for random frames (property test, frame sizes including
   8, 600 and 2048), every level's copy, analysed by FFT, has no energy above its stated maximum
   harmonic and in the Nyquist bin beyond floating-point noise (tolerance justified in the test),
   and no DC; consecutive levels' maximum harmonics differ by a factor of about √2 (two per
   octave).
-- [ ] **AC2 (no aliasing at any note):** for sample rates 44 100, 48 000 and 96 000 Hz and notes
+- [x] **AC2 (no aliasing at any note):** for sample rates 44 100, 48 000 and 96 000 Hz and notes
   across the whole range (MIDI 0–127, random frequencies, and frequencies up to and above
   Nyquist), the highest harmonic of every level with a non-zero weight, times the note frequency,
   is below Nyquist. A rendered steady note from a full-band frame (all harmonics present, for
   example a saw), analysed with a window and length stated in the test, has no component that is
   not a multiple of the note frequency above **−80 dB relative to the fundamental**, at MIDI
   notes across the range and at least one note inside each crossfade range.
-- [ ] **AC3 (crossfade is continuous):** the weight of each level is a continuous function of the
+- [x] **AC3 (crossfade is continuous):** the weight of each level is a continuous function of the
   note frequency: sweeping the note in small steps, up to and through Nyquist, never changes any
   level weight by more than a small bound per step; the weights sum to 1 below the last level's
   fade-out range and fall continuously to 0 across it.
-- [ ] **AC4 (bilinear morph):** with the playhead exactly on a frame, the output equals rendering
+- [x] **AC4 (bilinear morph):** with the playhead exactly on a frame, the output equals rendering
   that frame alone; between frames it is the bilinear mix of the four (checked against a reference
   computed in the test); this holds with `y_size = 1`, `z_size = 1`, both 1, and at the last frame
   of each axis.
-- [ ] **AC5 (one level choice):** the level weights used for the four frames are identical at
+- [x] **AC5 (one level choice):** the level weights used for the four frames are identical at
   every sample (by construction and by a test with four different frames).
-- [ ] **AC6 (DC removed, table unchanged):** a frame with a constant offset renders with no DC in
+- [x] **AC6 (DC removed, table unchanged):** a frame with a constant offset renders with no DC in
   the output (mean below a justified bound over whole cycles); after preparing, the source version
   is bit-identical to a deep snapshot taken before (`to_tuw3()`).
-- [ ] **AC7 (reuse):** preparing a version that differs in one frame from the previously prepared
+- [x] **AC7 (reuse):** preparing a version that differs in one frame from the previously prepared
   one builds copies for that frame only; every other frame's copies are shared (checked by
   pointer identity or a build counter).
-- [ ] **AC8 (smoothing):** after a jump of the playhead or the note, the rendered morph position
+- [x] **AC8 (smoothing):** after a jump of the playhead or the note, the rendered morph position
   and frequency move linearly: no per-sample change exceeds the bound implied by the smoothing
   time, and they equal the target exactly once that time has passed.
-- [ ] **AC9 (no clicks on swap, play, stop):** swapping in a prepared table with a different frame
+- [x] **AC9 (no clicks on swap, play, stop):** swapping in a prepared table with a different frame
   at the playhead while a note plays, and starting and stopping, never produces a sample-to-sample
   step larger than a bound derived from steady playing of the louder table (justified in the
   test).
-- [ ] **AC10 (real-time safety):** rendering, picking up a new table and control changes on the
+- [x] **AC10 (real-time safety):** rendering, picking up a new table and control changes on the
   audio side perform no heap allocation and no deallocation (checked with a counting global
   allocator in a test binary), including when the UI side has already dropped every reference it
   held to the old prepared table and to frames shared with it; old prepared tables and frames are
   dropped on the UI side, not in the render call.
-- [ ] **AC11 (size limit and memory):** a table of exactly 2²⁴ samples prepares; one more frame is
+- [x] **AC11 (size limit and memory):** a table of exactly 2²⁴ samples prepares; one more frame is
   refused with the *unsupported for preview* error; neither changes the source version. A
   prepared table's sample memory (all levels of all frames, as reported by the prepared table) is
   at most 8× the source table's, for frame sizes 8, 600, 2048 and 65 536.
-- [ ] **AC12 (edge notes):** a note at or above Nyquist renders silence; very low notes (below
+- [x] **AC12 (edge notes):** a note at or above Nyquist renders silence; very low notes (below
   1 Hz) and the lowest MIDI note render finite output using the fullest level; the output is
   finite for every combination tested above.
-- [ ] **AC13 (crate rules):** `tuw-core` gains `rustfft` (D4) and at most one small lock-free
+- [x] **AC13 (crate rules):** `tuw-core` gains `rustfft` (D4) and at most one small lock-free
   crate, both GPL-compatible and passing `cargo deny check`; no GUI, plugin, audio-device or
   file I/O dependency; every public item is documented; all `AGENTS.md` commands pass.
 
@@ -473,7 +473,7 @@ test `tests/preview_levels.rs`.
 **Interfaces:** produces `level_harmonics`, `level_length`, `LevelWeights`, `level_weights`, the
 constants, `PreviewError`.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `harmonics_per_frame_size`: `level_harmonics(8) == [3, 2, 1]`; for 600, 601, 2048 and
     65 536 the first is `(N - 1) / 2`, the list strictly decreases, ends at 1, every consecutive
     ratio is ≤ 0.75, and for `H_l ≥ 40` every ratio is ≥ 0.69 (two levels per octave).
@@ -487,11 +487,11 @@ constants, `PreviewError`.
     the full weight vector (weight per level index) never changes by more than 0.01 per step;
     weights sum to 1 (within 1e-6, f32 rounding) while f × H_last < `FADE_START × ny`, and to
     `on(last)` across the last fade-out.
-- [ ] **Step 2: Run** `cargo test --workspace`: fails (no module).
-- [ ] **Step 3: Implement** as in *Semantics*; add the dependencies; run `cargo deny check` and
+- [x] **Step 2: Run** `cargo test --workspace`: fails (no module).
+- [x] **Step 3: Implement** as in *Semantics*; add the dependencies; run `cargo deny check` and
   the `serde_json` feature check.
-- [ ] **Step 4: Run** the four `AGENTS.md` commands: pass.
-- [ ] **Step 5: Commit** `feat(tuw-core): add the preview level math (#26)`.
+- [x] **Step 4: Run** the four `AGENTS.md` commands: pass.
+- [x] **Step 5: Commit** `feat(tuw-core): add the preview level math (#26)`.
 
 ### Task 2: the preparer
 
@@ -501,7 +501,7 @@ constants, `PreviewError`.
 prepare}`, `Frame::addr`. In this task frames are deduplicated within one `prepare` (by
 `Frame::addr`); reuse across prepares is Task 3.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `levels_are_band_limited` (AC1): proptest over random frames (sizes 8, 600, 601, 2048; samples
     from `finite_f32` scaled into [-1, 1]): for each level, FFT of length `M_l`: every bin above
     `H_l` (up to `M_l / 2`), and bin 0, has magnitude ≤ 1e-4 × (largest bin of the level) +
@@ -517,16 +517,16 @@ prepare}`, `Frame::addr`. In this task frames are deduplicated within one `prepa
     samples (`silent(8, 2048, 1024)`, all frames one buffer) prepares, building one frame; check
     "unchanged" by every sample's bits being 0, not by a deep snapshot (the #24 gotcha).
   - `frame_size_8` (review focus 5): prepares with levels `[3, 2, 1]`, `sample_count() == 48`.
-- [ ] **Step 2: Run** `cargo test --workspace`: fails.
-- [ ] **Step 3: Implement** per *Semantics* (one `FftPlanner<f32>` kept in the `Preparer`).
-- [ ] **Step 4: Run** the gate: pass.
-- [ ] **Step 5: Commit** `feat(tuw-core): prepare band-limited levels for the preview (#26)`.
+- [x] **Step 2: Run** `cargo test --workspace`: fails.
+- [x] **Step 3: Implement** per *Semantics* (one `FftPlanner<f32>` kept in the `Preparer`).
+- [x] **Step 4: Run** the gate: pass.
+- [x] **Step 5: Commit** `feat(tuw-core): prepare band-limited levels for the preview (#26)`.
 
 ### Task 3: reusing unchanged frames
 
 **Files:** `preview/prepare.rs`; test `tests/preview_prepare.rs`.
 
-- [ ] **Step 1: Write the failing tests** (AC7):
+- [x] **Step 1: Write the failing tests** (AC7):
   - `one_changed_frame_builds_one`: prepare a 4 × 3 table, then a version with one frame
     replaced: `frames_built_last() == 1`, every other `PreparedTable::frame` is `Arc::ptr_eq` to
     the earlier one, the changed one is not.
@@ -534,7 +534,7 @@ prepare}`, `Frame::addr`. In this task frames are deduplicated within one `prepa
     buffer) builds 1.
   - `cache_holds_only_the_latest`: after preparing A then an unrelated B, preparing A again builds
     all of A's frames.
-- [ ] **Step 2: Run:** fails. **Step 3: Implement** the cache per *Semantics*. **Step 4: Run** the
+- [x] **Step 2: Run:** fails. **Step 3: Implement** the cache per *Semantics*. **Step 4: Run** the
   gate. **Step 5: Commit** `feat(tuw-core): reuse prepared frames that did not change (#26)`.
 
 ### Task 4: rendering (kernel, bilinear morph, levels)
@@ -546,7 +546,7 @@ yet: `set_playhead`/`set_frequency` set values directly in this task); tests
 **Interfaces:** consumes Tasks 1–3. Produces `Voice::{new, set_table, set_playhead,
 set_frequency, play, stop, render}` at fixed values.
 
-- [ ] **Step 1: Write the failing tests** (set every control *before* `play`, so nothing ramps):
+- [x] **Step 1: Write the failing tests** (set every control *before* `play`, so nothing ramps):
   - `no_aliasing_rendered` (AC2): naive saw frame (`N = 2048`, sample i = 2i/N − 1), one frame;
     fs ∈ {44 100, 48 000, 96 000}; notes MIDI 48, 69, 96, 108, 120 and, per fs, one frequency
     inside a crossfade (`(1 + FADE_START) / 2 × ny / H_l` for some mid level): render 1 024 warm-up
@@ -574,7 +574,7 @@ set_frequency, play, stop, render}` at fixed values.
     output using level 0 (`level_weights(..).first == 0`); frame size 8 renders finite output;
     `set_frequency` with NaN, ±∞, 0 and −440 renders silence and finite output; `set_playhead` with
     NaN or ∞ keeps the previous playhead.
-- [ ] **Step 2: Run:** fails. **Step 3: Implement** the kernel and the render loop per
+- [x] **Step 2: Run:** fails. **Step 3: Implement** the kernel and the render loop per
   *Semantics*. **Step 4: Run** the gate. **Step 5: Commit**
   `feat(tuw-core): render the preview with bilinear morph (#26)`.
 
@@ -582,7 +582,7 @@ set_frequency, play, stop, render}` at fixed values.
 
 **Files:** `preview/voice.rs`; test `tests/preview_voice.rs`.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `playhead_and_note_ramp` (AC8): after `set_playhead` from (0, 0) to (3, 0) and
     `set_frequency` from 220 to 440, a test-visible accessor (`Voice::playhead()`,
     `Voice::frequency()`, documented, `pub`) after each sample moves by at most
@@ -602,14 +602,14 @@ set_frequency, play, stop, render}` at fixed values.
     silent, `set_table` replaces at once and retires the old one.
   - `ramps_only_while_sounding` (AC8): while stopped, `set_playhead` / `set_frequency` jump
     (accessor equals the target at once).
-- [ ] **Step 2–5:** run (fails), implement per *Semantics*, run the gate, commit
+- [x] **Step 2–5:** run (fails), implement per *Semantics*, run the gate, commit
   `feat(tuw-core): smooth the preview and fade table swaps (#26)`.
 
 ### Task 6: lock-free hand-off and real-time safety
 
 **Files:** `preview/handoff.rs`; test `tests/preview_realtime.rs` (own binary).
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `render_allocates_nothing` (AC10, review focus 4): a counting `#[global_allocator]`
     (`unsafe impl GlobalAlloc` is allowed here: the test is its own crate; Rust 2024 needs
     explicit `unsafe {}` blocks inside its methods) that counts allocations and deallocations only
@@ -626,25 +626,40 @@ set_frequency, play, stop, render}` at fixed values.
     table is given back by `set_table`; `stop` still arrives while a table waits.
   - `controls_arrive`: `set_frequency`, `set_playhead`, `play`, `stop` sent through
     `PreviewControl` change the rendered output as the `Voice` tests expect (one smoke check).
-- [ ] **Step 2–5:** run (fails), implement per *Semantics*, run the gate, commit
+- [x] **Step 2–5:** run (fails), implement per *Semantics*, run the gate, commit
   `feat(tuw-core): hand the preview to the audio thread lock-free (#26)`.
 
 ### Task 7: crate docs
 
 **Files:** `lib.rs`, `preview/mod.rs` docs.
 
-- [ ] **Step 1:** module doc for `preview`: the two halves, levels (two per octave, strictly
+- [x] **Step 1:** module doc for `preview`: the two halves, levels (two per octave, strictly
   band-limited, Nyquist bin dropped, stored ≥ 2× oversampled), the −80 dB bound and why
   interpolation can't be perfect, the hand-off and the never-free-on-audio rule, that only
   `Document::finished()` should be prepared, the size limit as *unsupported for preview*. A
   doctest: prepare a silent 2048 × 1 × 1 table, `preview(48_000.0, 8)`, send it, play, render one
   buffer on the same thread, `collect()`. Add a *The preview* line to the crate doc.
-- [ ] **Step 2:** the gate; every DSP claim in the prose matches a test (the DSP reviewer checks
+- [x] **Step 2:** the gate; every DSP claim in the prose matches a test (the DSP reviewer checks
   this, `AGENTS.md` gotcha).
-- [ ] **Step 3: Commit** `docs(tuw-core): describe the preview oscillator (#26)`.
+- [x] **Step 3: Commit** `docs(tuw-core): describe the preview oscillator (#26)`.
 
 ---
 
 ## Notes
 
--
+- Built by the loop; every task had a fresh review, the docs a separate DSP-claims review, then a
+  whole-branch review on the most capable model and one fix wave with a scoped re-review.
+- Measured: inharmonic components between −92.2 and −106.8 dB relative to the fundamental
+  (bound −80 dB); the worst value sits near the analysis window's own floor. Prepared memory
+  about 6.8× the table's samples (≤ 8× tested for every frame size).
+- Builder calls beyond the plan, each recorded in the commits: FFTs in f64 with levels and output
+  clamped to ±f32::MAX, because TUW3 allows samples up to ±f32::MAX and an f32 FFT overflows;
+  `H_0 = (N − 1) / 2` so odd frame sizes keep their top harmonic (the spec's `N/2 − 1` assumed even
+  N); next level `min(round(H/√2), floor(0.75H))`; an unusable note fades out like `stop` instead
+  of cutting; re-sending a target doesn't restart its ramp; the playhead is clamped into a newly
+  taken table's grid while the fading table keeps its own copy; `preview()` clamps its capacity to
+  1..=65 536.
+- Left open for the maintainer: three crossfade ranges (level pairs 5–6, 7–8, 9–10 of a
+  2048-sample frame) are skipped by the AC2 test because the sample rate is an exact multiple of
+  the test note there; a slightly detuned note would cover them. `set_playhead` doesn't clamp a
+  target far outside the current grid, so #28 must send in-range coordinates.
