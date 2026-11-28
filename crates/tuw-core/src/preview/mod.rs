@@ -9,6 +9,9 @@
 //!
 //! # Two halves
 //!
+//! The UI thread holds a [`Preparer`] and a [`PreviewControl`]; the audio thread holds an
+//! [`Oscillator`]. [`preview`] makes the control and oscillator pair.
+//!
 //! - **[`Preparer`] (UI thread).** Turns a [`Wavetable`](crate::Wavetable) into a
 //!   [`PreparedTable`]. It allocates and runs FFTs, so it must never run on the audio thread.
 //!   It remembers the frames it built, so preparing an edited table again only builds the frames
@@ -16,7 +19,7 @@
 //! - **[`Oscillator`] (audio thread).** Renders blocks with [`Oscillator::render`], which
 //!   allocates nothing, frees nothing, takes no lock and cannot panic.
 //! - **[`PreviewControl`] (UI thread).** The other end of the [`Oscillator`]: it sends tables,
-//!   playhead, frequency, play and stop. [`preview`] makes the pair.
+//!   playhead, frequency, play and stop, and takes tables back.
 //!
 //! Which table to prepare: only [`Document::finished`](crate::Document::finished), and only
 //! when [`Document::change_id`](crate::Document::change_id) changes. An open step's
@@ -44,14 +47,16 @@
 //! A level is read at fractional positions, and any interpolation filter is a compromise. A
 //! short filter has a wide transition band, so it lets some of the spectrum's mirror images
 //! through; a longer one costs more per sample. The preview uses a [`KERNEL_TAPS`]-tap sinc
-//! windowed by a Kaiser window ([`KERNEL_BETA`]), tabulated at [`KERNEL_PHASES`] fractional
-//! offsets and interpolated linearly between them. Because every level is at least 2×
+//! windowed by a Kaiser window ([`KERNEL_BETA`]), tabulated at `KERNEL_PHASES + 1` fractional
+//! offsets ([`KERNEL_PHASES`] steps of one sample, 0 to 1) and interpolated linearly between
+//! neighbouring rows. Because every level is at least 2×
 //! oversampled, its content sits in the lower half of the band and the kernel's transition band
 //! falls where the level has nothing, so what remains is small but not zero. The tests render
 //! a saw at 44.1, 48 and 96 kHz over five notes plus a note in a crossfade and check that
 //! every spectral line that is not a harmonic of the note stays at or below -80 dB relative to
-//! the fundamental. (The worst measured value is about -93 dB; the tests check -80 dB,
-//! and that is all this module promises.) A control test shows the analysis does catch
+//! the fundamental. (The worst measured value, about -93 dB, sits near the
+//! analysis window's own floor, so it says more about the measurement than about the
+//! oscillator; the promise is the tested -80 dB.) A control test shows the analysis does catch
 //! aliasing: a naive saw read with plain linear interpolation is far above the bound.
 //!
 //! # Hand-off and the never-free-on-audio rule
@@ -62,7 +67,10 @@
 //! so the [`Oscillator`] never drops a table: when the voice has faded one out, it goes back
 //! through the return ring, or waits in a preallocated holding slot while that ring is full.
 //! The UI thread drops them in [`PreviewControl::collect`]. Call `collect` regularly (once
-//! per frame drawn is plenty).//!
+//! per frame drawn is plenty). Tables come back to the UI even when the UI has already dropped
+//! all its own references and the [`Preparer`], and when frames are shared between tables; the
+//! audio thread still frees nothing.
+//!
 //! **Dropping the [`Oscillator`] frees whatever it still holds**, so drop it off the audio
 //! thread: move it back to the UI thread, or hand it to a thread that frees it.
 //!
@@ -73,7 +81,9 @@
 //!   [`PreviewError::Unsupported`]. The table is valid; the preview just doesn't play it.
 //! - **Memory.** All levels of one frame together hold at most [`MAX_MEMORY_FACTOR`] (8) times
 //!   the frame size in samples, so a prepared table holds at most 8× the table's samples
-//!   ([`PreparedTable::sample_count`]). The levels sum to about 6.8× the frame size.
+//!   ([`PreparedTable::sample_count`]). The levels sum to about 6.8× the frame size for frame sizes from 256 up, and up to
+//!   about 7.2× for small frames; never more than 8×, tested for every frame size
+//!   8..=65 536.
 //! - **Unusable notes.** A frequency that is not finite or not positive fades the note out
 //!   over [`PLAY_FADE_SECONDS`] like `stop`, and the output stays finite.
 //! - **Ring capacity.** [`preview`] clamps its capacity to `1..=65_536`.
